@@ -1,0 +1,125 @@
+Singleton* Singleton::Get(){
+    if(instance == nullptr){
+        std::lock_guard<std::mutex> guard(lock);
+        if(instance == nullptr){
+            instance = operator new(sizeof(Singleton));
+            new(instance) Singleton;
+        }
+    }
+    return instance;
+}
+//instance!=nullptr but is garbage
+int data;
+volatile bool ready = false;
+void foo(){ //CPU 0
+    data = 42; -------|
+    STORE________STORE|
+    ready = true;     |
+    <-----------------|
+}
+void bar(){ //CPU  1
+    int tmp = data;
+    if(ready){
+        LOAD__________LOAD
+        assert(data|tmp == 42);
+    }
+}
+load/store
+//Барьер памяти
+//acquire: чтение вверх-вниз 
+//         записи вверх
+//release: чтение вниз
+//         записи вверх-вниз
+release - все выполниться до записей что ниже черты
+void function_with_lock(){
+...
+if(can_enter){
+    acquire_fence();
+    //all instructions
+    //stay between
+    //these fences
+    release_fence();
+    can_enter = true;
+}
+...
+}
+bool x = true;
+bool y = true;
+void foo(){
+    <-------------|
+    x = false;    |
+    STORE____LOAD |
+    assert(y);----|
+}
+void bar(){
+    y = false;
+    STORE_____LOAD
+    assert(x);
+}
+storeload - самый тяжелый, все кеши cinhro
+memory models:
+1) sequential consistecy | nothing
+2) strongly-ordered | only store load
+3) weakly-oredered |+loadloadstorestore
+4) super-weak 
+
+#include <atomic>
+enum memory_order{
+       memory_oreder_relaxed,
+       memory_oreder_consume,light acq
+       memory_oreder_acquire,
+       memory_oreder_release,
+       memory_oreder_acq_rel,
+       memory_oreder_seq_cst
+}
+std::atomic<bool> ready;
+void foo(){
+    data = 42;
+    ready.store(true, std::memory_order_release);
+}
+void bar(){
+    if(ready.load(std::memory_order_acquire)){
+        assert(data == 42);
+    }
+}
+
+std::atomic<bool> ready;
+void foo(){
+    data = 42;
+    std::atomic_thread_fence(std::memory_order_release);
+    ready.store(true, std::memory_order_relaxed);
+}
+void bar(){
+    if(ready.load(true, std::memory_order_relaxed)){
+        std::atomic_thread_fence(std::memory_order_aquire);
+        assert(data == 42);
+    }
+}
+
+Singleton* Singleton::Get(){
+    if(instance.load()==nullptr){
+        std::lock_guard<std::mutex> guard(lock);
+        if(instance.load()==nullptr){
+            instance.store(new Singleton());
+        }
+    }
+    return instance.load();
+}
+
+Singleton* Singleton:;Get(){
+    auto tmp = instance.load(atd::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_acquire);
+    if(tmp==nullptr){
+        std::lock_guard<std::mutex> guard(lock);
+        tmp = instnce.load(std::memory_order_relaxed);
+        if(tmp==nullptr){
+            tmp = new Singlton();
+            std::atomic_thread_fence(std::memory_order_release);
+            instnce.store(tmp, std::memory_order_relaxed);
+        }
+    }
+    return tmp;
+}
+lock-free
+memory models(weakly strongly(assert+assert, optim(full bariers)))
+this for proc and compiler - 1 core weak Mthread can failed data42
