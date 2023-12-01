@@ -31,6 +31,12 @@ cahr const * const s4;
 char &r1 = r;
 const char &r2 = r1;
 
+int foo(const int *p){int t = *p; delete p; return t;}
+int bar(const int &p){return p;}
+foo(nullptr);//!bar
+double d = 2.0;
+int *q = *reinterpret_cast<int **>(&d);
+foo(q);//!bar
 
 int foo(){return 42;}
 const int &l = foo();
@@ -39,8 +45,17 @@ c-инкапсуляция: обьект на стеке, проблемы с и
 модификатор на имена данных
 консистентное состояние
 ссылка - инкапсуляция указателя
-инкапусуляция это свойство типа
-
-
-
+инкапусуляция это свойство типа:
+(использовать имена внутри методов типа)
+template <typename T> class list_t{
+    node_t<T> *top_, *back_;
+public:
+    void concat_with(list_t<T> other){
+        for(auto cur = other.top_;//такого же типа, он открыт. С другим параметром другой тип
+            cur!=other.back_;
+            cur = cur->next_)
+        push(cur->data_); 
+    }
+};
+теперь важны конструкторы
 
