@@ -53,9 +53,47 @@ S *p = new {1,2};//!
 int foo(int &x);
 foo(1);//!
 int &x - 1;//!
-//24:25
 
+decaying
+void foo(int *);
+int arr[5];
+int* t = arr + 3;//ok
+foo(arr);//ok
+arr = t;//!
 
+lvalue rvalue
+location value
+y = x;
+int& foo();//can be ok
+foo() = x;//ok
 
+void (*bar(int x, void (*func)(int&)))(int&);
+typedef void (*ptr_to_fref)(&int&);
+ptr_to_fref bar(int x, ptr_to_fref func);
 
+using ptr_to_fref = void (*)(int&);
+for template
 
+Манглирование
+гарантия имен, нет неявных ссылок
+extern "C"
+
+правила перегрузки
+name resolutuion
+float sqrt(float x);
+double sqrt(double x);
+sqrt(42);//!
+
+int x;
+int foo(){return ::x;}
+namespace{
+    int foo(){return 42;}
+}
+сложное уникальное имя и его using
+видно только внутри модуля
+никто не напишет extern foo как со static
+
+не засорять глобальное пространство имен
+никогда не писать using namespace в заголовочных файлах
+использовать анонимное пространства имен вместо статических функций
+не использовать анонимные прсотранства имен в заголовочных файлах
