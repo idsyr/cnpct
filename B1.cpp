@@ -93,6 +93,7 @@ bool cache_lookup_update(struct cache_T *c, int key, slow_get_page_t slow){
 C++ решает эту проблему:
 Обьединение_данных_и_методов
 Обобщение_типов_и_функций
+
 template<typename T> struct Point{T x, y};
 template<typename U> struct Triangle{
     Point<U> pts[3];
@@ -145,11 +146,12 @@ template <typename T, typename Comp=std::less>
 void qsortpp (It start, It fin, Comp compare);
 
 ------------------------------------| solution problems |---------------
-должен жить в .h     решение->   explicit instatiate a template funstion
+должен жить в .h     решение->   explicit instantiate a template funstion
 templates increases code size
 
-template <typename T> void func(T arg){} //definition
-template void func<int>(int arg);        //explicit instatiation
+template <typename T> class... public: void func(T arg){} //declaration in header
+template <typename T> void func(T arg){} //definition in cpp
+template void func<int>(int arg);        //explicit instantiation in cpp
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
