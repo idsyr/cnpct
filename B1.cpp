@@ -1,20 +1,18 @@
+---------------------------------| problem |----------------------
 struct page{
     int index;
     int sz;
     char *data;
 };
 void slow_get_page(int n, struct page *p);
-
+---------------------------------| solution |---------------------
 solution: cache 
-//simple: random, LRU(least recently used)
-//structure: list+hash_map
+simple: random, LRU(least recently used)
+structure: list+hash_map
 
 
-
-
-
-
-//скрытая реализация
+скрытая реализация (на С это в файле .с)
+//list.c
 struct list_node_t{
     struct list_node_t *next;
     struct list_node_t *prev;
@@ -25,7 +23,7 @@ struct list_t{
     struct list_node_t *back;
 };
 
-//.h
+//list.h
 struct list_t *list_create();
 int list_size(const struct list_t *lst);
 struct page_t *list_back(struct list_t *lst);
@@ -35,7 +33,7 @@ void list_move_front(struct list_t *lst, struct page_t *q);
 coid lsit_move_upfront(struct list_t *lst, struct list_node_t *p);
 void list_free(struct list_t *lst);
 
-//hash_table
+//hash_table.c
 struct hashmap_entry_t{
     int key;
     list_node_t *node;
@@ -49,7 +47,7 @@ struct hash_t{
     int len;
 };
 
-//.h
+//hash_table.h
 struct hash_t *htable_create(int len);
 list_node_t *htable_find(struct hash_t *h, int key);
 void htable_insert(struct hash_t *h, int key, struct page_t *data);
@@ -61,19 +59,20 @@ void cache_free(struct cache_t *c);
 typedef struct page_t* (*slow_get_page_t)();
 bool cache_lookup_update(struct cache_t *c, int ket, slow_get_page_T slow);
 
-//hidden->
+//cache.c
 struct cache_t{
     int sz;
     struct hash_t hash;
     struct list_t lst;
 };
 
+//cache.h
 bool cache_lookup_update(struct cache_T *c, int key, slow_get_page_t slow){
     struct list_node_t *pnode = htable_find(c->hash, key);
     if(pnode == nullptr){
         struct hashmap_entry_t newent;
         if(list_size(c->lst) == c->sz){
-            int bakid = list_back(c->lst)->id;
+            int backid = list_back(c->lst)->id;
             htable_erase(c->hash, backid);
             lsit_pop_back(c->lst);
         }
@@ -87,25 +86,19 @@ bool cache_lookup_update(struct cache_T *c, int key, slow_get_page_t slow){
     list_move_upfront(&c->lst, pnode);
     return true;
 }
-problem:
+------------------------------------| solution problems |---------------
 - изменение типа данных, ключей //void*, macros
 - rehash - list, not array
 
-
-
-
-
-
-
-
-
-//Обьединение_данных_и_методов
-//Обобщение_типов_и_функций
+C++ решает эту проблему:
+Обьединение_данных_и_методов
+Обобщение_типов_и_функций
 template<typename T> struct Point{T x, y};
 template<typename U> struct Triangle{
     Point<U> pts[3];
     U double_square(); //abs, div for U
 }
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
@@ -114,10 +107,15 @@ template<typename U> struct Triangle{
 
 
 
-problem: 
+
+
+-------------------------------------| problem |-----------------------
 #define MAX(x, y) (((x)>(y)))?(x):(y))
 -побочные эффекты
 -проблемы с производительностью
+Y-------------------------------------| solution |---------------------
+std::max
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
@@ -127,8 +125,16 @@ problem:
 
 
 
+
+-------------------------------------| problem |-----------------------
 void qsort(void* base, size_t num, size_t size, int (*compare)(const void*, const void*));
 
+0) comp inline problem
+1) void*
+2) size
+3) *like object
+
+------------------------------------| solution |-----------------------
 template <typename T, typename Comp>
 void qsortpp(T* base, size_t size, Comp compare);
 
@@ -138,21 +144,24 @@ void qsortpp (T* start, T* fin, Comp compare);
 template <typename T, typename Comp=std::less>
 void qsortpp (It start, It fin, Comp compare);
 
-inline optimization
-.h <- полностью
-code size
+------------------------------------| solution problems |---------------
+должен жить в .h     решение->   explicit instatiate a template funstion
+templates increases code size
 
-Законченная абстракция, конструктор
-value semantics - как int, такой же естественный
-
-
-
+template <typename T> void func(T arg){} //definition
+template void func<int>(int arg);        //explicit instatiation
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
 
 
 
+
+
+
+
+конструктор это шаг к value semantics - как int, такой же естественный
 
 
 //jagged_arrays, **
