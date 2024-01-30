@@ -1,12 +1,15 @@
-search tree
-range quires
-template <typename C, typename T>
-int range_query(const C& s, T fst, T snd){
-using itt = typename C::iterator;
-itt start = s.lower_bound(fst);
-itt fin = s.upper_bound(snd);
-return std::distance(s, start, fin);
+---------------------------------------| Поисковые деревья |------------------------------------
+------//удобны для range queries:
+template <typename C, typename T> int range_query(const C& s, T fst, T snd){
+	using itt = typename C::iterator;
+	itt start = s.lower_bound(fst);
+	itt fin = s.upper_bound(snd);
+	return std::distance(s, start, fin);
 }
+
+
+
+-----//Проектирование
 namespace Trees{
     template <typename KeyT, typename Comp>
     class SearchTree{
@@ -20,146 +23,158 @@ namespace Trees{
     public:
         void insert(KeyT key);
     };
+}
+
+
+
+
+
+---------------------------------------| Проектирование узла |------------------------------------
     struct Node{
         KeyT key_;
         Node *parent_, *left, *reight_;
         int height_;
-    }
+    };
     Node n = {key, nullptr, nullptr, nullptr, 0}; //agregate
-    Node n = {key};
-    Node n {key};
-    //private, etc
+    Node n = {key};//остальные нули
+    Node n {key};//остальные нули с++11
+------//Проблемы:агрегатная инициализация ломается при появлении private и прочего
+      
+
+
     struct Node{
         KeyT key_;
         Node *parent_ = nullptr,
-             *left_ = nullptr, 
-             *right_ = nullptr;
+             *left_   = nullptr, 
+             *right_  = nullptr;
         int height_ = 0;
         Node(KeyT key){key_ = key;}
     }
     Node n(key); //direct old
     Node n{key}; //direct new
-    Node k = key;//copy
-}
+    Node k = key;//copy init
+------//Проблемы: двойной вызов конструктора, конструктор вошел в тело - все поля проинициализированы
+------//поле - const ptr
 
-old init
-myclass_t m(list_T(), list_t());
-myclass_t m{list_T(), list_t()};
 
-struct S{
-S() {std::cout<<"default"<<std::endl;}
-S(KeyT key){std::cout<<"direct"<<std::endl;}
-};
-S key_; int val_;
-Node(KeyT key, int val){key_ = key; val_ = val;}
-//def dir
-//key -> ref -> *const
-Node(KeyT key, int val) : key_(key), val_(val){}
- 
+Node(KeyT key, int val = 0) : key_(key), val_(val){} //выполняется в порядке полей в классе
 
-struct Node{
-    S key_; T key2_;
-    Node(KeyT ket) : key2_(key){}//S,T
-};
-struct Node{
-    S key_ = 1; T key2_;
-    Node(KeyT key) : key2_(key){}//st
 
-S key_;
-Node(KeyT key = 1) : key_(key) {}
-};
+class_c(int a, int b): class_c(int a){}//делегация конструкторов
 
-делегация конструкторов
 
-~Node(){delete left_; delete right_;}
-//on stack? or overflow
+-----//решение проблемы fun decl
+myclass_t m(list_T(), list_t()); >>> myclass_t m{list_T(), list_t()};
 
-SearchTree s;  //def init
-SearchTree t{};//def init
-int n;  //def init
-int m{};//val init
+
+
+
+
+------------------------------------------| Value-init |------------------------------------
+SearchTree s;   //def init
+SearchTree t{}; //def init
+int n;          //def init
+int m{};        //val init
 int* p = new int[5]{}; //calloc
 
-class Empty{
-Empty& operator=(const Empty&);
-}
+
+
+---------------------------------| Копирование и присваивание |------------------------------------
+class Empty{Empty& operator=(const Empty&);}//1 байт
 
 Copyable a;
-Copyable b(a), c{a}; //dir ctr
-Copyable d = a;      //copy ctr
-a = b; //assignment
-d = c = a = b;
+Copyable b(a), c{a}; //прямое конструирование via copy ctor
+Copyable d = a;      //копирующее конструирование
+d = c = a = b;       //присваивание
 
+
+------//compiler generate:
 template <typename T> struct Point2D{
     T x_, y_;
     Point2D() : default-init x_, default-init y_{}
-~Point2D(){}
-Point2D(const Point2D& rhs) : x_(rhs.x_), y_(rhs.y_){}
-Point2D& operator=(const Point2D& rhs){
-x_ = rhs.x_; y_ = rhs.y_; return *this;
-}
+    ~Point2D(){}
+    Point2D(const Point2D& rhs) : x_(rhs.x_), y_(rhs.y_){}
+    Point2D& operator=(const Point2D& rhs){
+    x_ = rhs.x_; y_ = rhs.y_; return *this;}
 };
-побитовое копирование
-Buffer(const Buffer& rhs) = delete;
-Buffer(const Buffer& rhs) : 
-    n_(rhs.n_), 
-    p(new int[n_])
-    {std::copy(p_, p_+n_, rhs.p_);}
 
-Buffer& Buffer::operator=(const Buffer& rhs){
-n_ = rhs.n_;
-delete [] p_;
-p_ = new int[n_];
-std::copy(p_, p_+n_, rhs.p_);
-return *this;
+-----//тонкости
+class Buffer{
+	int n_; int *p_;
+public:
+	Buffer(int n): n_(n), p(new int[n]){}
+	~Buffer(){delete[] p_;}
+	Buffer(const Buffer& rhs) = delete;
+	Buffer(const Buffer& rhs) : n_(rhs.n_), p(new int[n_]) {std::copy(p_, p_+n_, rhs.p_);}
+	Buffer& operator=(const Buffer& rhs);
+
 }
-a=a;//!
-if(this==&rhs) return *this;
-heap//!
+Buffer& Buffer::operator=(const Buffer& rhs){
+	if(this==&rhs) return *this;
+	n_ = rhs.n_;
+	delete [] p_;
+	p_ = new int[n_];
+	std::copy(p_, p_+n_, rhs.p_);
+	return *this;
+}
+//Может закончиться куча
 
-cv cval
+
+
+
+
 cntr!template
 
+---------------------------------| Спецсемантика копирования, RVO |------------------------------------
 struct foo{
-foo(){cout<<"foo()"<<endl;}
-foo(const foo&){cout<<"foo(const foo&)"<<endl}
-~foo(){cout<<"~foo()"<<endl}
+	foo(){cout<<"foo()"<<endl;}
+	foo(const foo&){cout<<"foo(const foo&)"<<endl}//can be foo, foo&, cv cvalific foo&, but cant be foo<U>
+	~foo(){cout<<"~foo()"<<endl}
 };
 foo bar(){foo local_foo; return local_foo;}
 int main(){
-foo f = bar();
-use(f);//void use(foo&);
+	foo f = bar();
+	use(f);//void use(foo&);
 }
 
+---------------------------------| Спецсемантика инициализации, explicit |------------------------------------
+-----//обычные конструкторы определяют неявное преобразование типа
 struct MyString{
-char *buf_; size_t len_;
-explicit MyString(size_t len) : buf_{new char[len]{}}, len_[len]{}
+	char *buf_; size_t len_;
+	explicit MyString(size_t len) : buf_{new char[len]{}}, len_[len]{}
 };
 void foo(MyString);
-foo(42);//ok if !explicit
-foo f{2};//ok
-foo f = 2;//!
-
-/*explicit*/ operator const char*(){return buf_;}
+foo(42);//ok if !explicit конструктор
 
 
+
+struct Foo{explicit Foo(int x){}};
+foo f{2};//ok прямая инициализация
+foo f = 2;//! инициализация копированием
+
+
+
+-----//преобразование из const char* в нас
+struct my_string{
+	char *buf_; size_t len_;
+	/*explicit*/ operator const char*(){return buf_;}
+}
+
+
+------//конфликты
 struct Foo{
-Foo(){}
-Foo(const Bar &){std::cout<<"Ctor Bar -> Foo"<<std::endl;}
+	Foo(){}
+	Foo(const Bar &){std::cout<<"Ctor Bar -> Foo"<<std::endl;}
 };
 struct Bar{
-Bar(){}
-bar(const Foo&){std::cout<<"Ctor Foo -> Bar"<<std::endl;}
-operator Foo(){
-std::cout<<"Op Bar -> Foo"<<std::endl;
-return Foo();
-}
+	Bar(){}
+	bar(const Foo&){std::cout<<"Ctor Foo -> Bar"<<std::endl;}
+	operator Foo(){std::cout<<"Op Bar -> Foo"<<std::endl; return Foo();}
 };
-
 int main(){
-Bar b;
-Foo f1{b}; //dir все конструкторы даже explicit
-Foo f2 = b;//cp только implict но еще и Op
+	Bar b;
+	Foo f1{b}; //direct-init: все конструкторы даже explicit
+	Foo f2 = b;//copy-init: только implict но еще и Op
 }
 
 Стандартные преобразования выигрывают у пользовательских но они у ...
