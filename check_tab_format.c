@@ -6,6 +6,6 @@ void copy(int *to, int const *from, int count){
 		case 3:	     *to++ = *from++;
 		case 2:      *to++ = *from++;
 		case 1:      *to++ = *from++;
-						} while (--n > 0);
+		        } while (--n > 0);
 	}
 }
