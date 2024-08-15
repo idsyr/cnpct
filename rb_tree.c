@@ -14,6 +14,7 @@ typedef struct node {
 typedef struct rb_tree {
 	node_t *nil;
 	node_t *top;
+	int sz;
 } rb_tree_t;
 
 
@@ -31,7 +32,9 @@ static node_t* create_node(int val){
 rb_tree_t *create_rb_tree(){
 	rb_tree_t *rb_tree =  malloc(sizeof(rb_tree_t));
 	rb_tree->nil = create_node(42);
+	rb_tree->nil->color = BLACK;
 	rb_tree->top = NULL;
+	rb_tree->sz = 0;
 	return rb_tree;
 }
 
@@ -86,6 +89,7 @@ static void rb_insert_fixup(rb_tree_t *tree, node_t *path_node){
 	while(path_node->parent != NULL &&
 				path_node->parent->parent != NULL &&
 				path_node->parent->color == RED){
+		
 		if(path_node->parent == path_node->parent->parent->left){
 			node_t *uncle = path_node->parent->parent->right;
 			color_t uncle_color = (uncle == NULL)? BLACK : uncle->color;
@@ -101,7 +105,8 @@ static void rb_insert_fixup(rb_tree_t *tree, node_t *path_node){
 				path_node->parent->color = BLACK;
 				path_node->parent->parent->color = RED;
 				right_rotate(tree, path_node->parent->parent);
-			}	
+			}
+			
 		} else {
 			node_t *uncle = path_node->parent->parent->left;
 			color_t uncle_color = (uncle == NULL)? BLACK : uncle->color;
@@ -119,13 +124,16 @@ static void rb_insert_fixup(rb_tree_t *tree, node_t *path_node){
 				left_rotate(tree, path_node->parent->parent);
 			}
 		}
+		
 	}
 }
 
 
-void rb_insert(rb_tree_t *tree, int val){
+void rbt_insert(rb_tree_t *tree, int val){
 	node_t *new_node = create_node(val);
 	node_t *path_node = tree->top;
+
+	++tree->sz;
 
 	if(tree->top == NULL) {
 		new_node->color = BLACK;
@@ -176,7 +184,7 @@ static node_t* rb_minimum(node_t *path_node){
 }
 
 
-int rb_find(rb_tree_t *tree, int val){
+int rbt_find(rb_tree_t *tree, int val){
 	node_t *node = find_node(tree, val);
 	return (node == NULL)? -1 : node->val;
 }
@@ -240,12 +248,14 @@ static void delete_fixup(rb_tree_t *tree, node_t *path_node){
 }
 
 
-void rb_delete(rb_tree_t *tree, int val){	
+void rbt_delete(rb_tree_t *tree, int val){	
 	node_t *rm_node = find_node(tree, val);
 	node_t *min_node;
 	node_t *fixup_node;
 	color_t fixup_color = rm_node->color;
 	if(rm_node == NULL) return;
+
+	++tree->sz;
 
 	if(rm_node->left == NULL){
 		fixup_node = rm_node->right;
@@ -279,22 +289,71 @@ static void print_postorder(node_t* path_node){
 }
 
 
-void rb_print_postorder(rb_tree_t *tree){
+void rbt_print_postorder(rb_tree_t *tree){
+	printf("__postorder:__\n");
 	node_t *path_node = tree->top;
 	print_postorder(path_node);
-	printf("\n");
+	printf("\n\n");
 }
 
 
-// TODO: rbt_print_preorder()
-// TODO: rbt_clean()
-// TODO: rbt_print_graphic()
+static int line_control(int *line_num, int *line_count, int *line_null_count){
+	if(*line_num <= *line_count){
+			if(*line_num == *line_null_count) return 0;
+			*line_num *= 2;
+			*line_null_count = 0;
+			*line_count = 0;
+			printf("\n");
+		}
+	return 1;
+}
 
 
-//     +---+
-//     | p |   
-//   +-|___|-+  
-//   |       |  
-// +---+   +---+
-// | l |   | r |
-// |___|   |___|
+void rbt_print_preorder(rb_tree_t *tree){
+	printf("__preorder:__\n");
+	list_t *queue = create_list();
+	list_push_back(queue, tree->top);
+	
+	int line_width = pow(2, (int)(log(tree->sz+1) / log(2)+3)) + 1;
+	int line_num = 1;
+	int line_count = 0;
+	int line_null_count = 0;
+	
+	while(!list_empty(queue)){
+		++line_count;
+
+		int tabln = line_width/(line_num + 1) + line_width%(line_num);
+		
+		node_t* tmp = list_pop_front(queue);
+		if(tmp == NULL) {
+			++line_null_count;
+			
+			printf(ANSI_COLOR_YELLOW "%*c" ANSI_COLOR_RESET, tabln, 'n');
+			list_push_back(queue, tmp);
+			list_push_back(queue, tmp);
+		} else {
+			if(tmp->color==BLACK) printf(ANSI_COLOR_GREEN "%*d" ANSI_COLOR_RESET, tabln, tmp->val);
+			else                  printf(ANSI_COLOR_RED   "%*d" ANSI_COLOR_RESET, tabln, tmp->val);
+			list_push_back(queue, tmp->left);
+			list_push_back(queue, tmp->right);
+		}
+		
+		if(!line_control(&line_num, &line_count, &line_null_count)) break;
+	}
+	list_clean(queue);
+	printf("\n\n");
+}
+
+
+void rbt_clean(rb_tree_t *tree){
+	list_t *queue = create_list();
+	list_push_back(queue, tree->top);
+	while(!list_empty(queue)){
+		node_t* tmp = list_pop_front(queue);
+		if(tmp == NULL) continue;
+		list_push_back(queue, tmp->left);
+		list_push_back(queue, tmp->right);
+		free(tmp);
+	}
+	free(tree->nil);
+}
