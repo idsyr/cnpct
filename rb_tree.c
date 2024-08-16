@@ -18,7 +18,7 @@ typedef struct rb_tree {
 } rb_tree_t;
 
 
-static node_t* create_node(int val){
+static node_t* create_node( int val){
 	node_t *node = malloc(sizeof(node_t));
 	node->parent = NULL;
 	node->left   = NULL;
@@ -85,44 +85,31 @@ static void right_rotate(rb_tree_t *tree, node_t *x){
 }
 
 
-static void rb_insert_fixup(rb_tree_t *tree, node_t *path_node){
+static void rbt_insert_fixup(rb_tree_t *tree, node_t *path_node){
 	while(path_node->parent != NULL &&
-				path_node->parent->parent != NULL &&
-				path_node->parent->color == RED){
+	      path_node->parent->parent != NULL &&
+	      path_node->parent->color == RED){
+
+		int left_fixup = path_node->parent == path_node->parent->parent->left;
+		node_t *uncle = (left_fixup)?
+			path_node->parent->parent->right : path_node->parent->parent->left;
+		color_t uncle_color = (uncle == NULL)? BLACK : uncle->color;
 		
-		if(path_node->parent == path_node->parent->parent->left){
-			node_t *uncle = path_node->parent->parent->right;
-			color_t uncle_color = (uncle == NULL)? BLACK : uncle->color;
-			if(uncle_color == RED){
-				path_node->parent->color = BLACK;
-				uncle->color = BLACK;
-				path_node->parent->parent->color = RED;
-				path_node = path_node->parent->parent;
-			} else {
-				if(path_node == path_node->parent->right){
-					path_node = path_node->parent;
-					left_rotate(tree, path_node);}
-				path_node->parent->color = BLACK;
-				path_node->parent->parent->color = RED;
-				right_rotate(tree, path_node->parent->parent);
-			}
-			
+		if(uncle_color == RED){
+			path_node->parent->color = BLACK;
+			uncle->color = BLACK;
+			path_node->parent->parent->color = RED;
+			path_node = path_node->parent->parent;
 		} else {
-			node_t *uncle = path_node->parent->parent->left;
-			color_t uncle_color = (uncle == NULL)? BLACK : uncle->color;
-			if(uncle_color == RED){
-				path_node->parent->color = BLACK;
-				uncle->color = BLACK;
-				path_node->parent->parent->color = RED;
-				path_node = path_node->parent->parent;
-			} else {
-				if(path_node == path_node->parent->left){
-					path_node = path_node->parent;
-					right_rotate(tree, path_node);}
-				path_node->parent->color = BLACK;
-				path_node->parent->parent->color = RED;
-				left_rotate(tree, path_node->parent->parent);
-			}
+			if(path_node == ((left_fixup)?
+				path_node->parent->right : path_node->parent->left)){
+				path_node = path_node->parent;
+				(left_fixup)? left_rotate(tree, path_node) : right_rotate(tree, path_node);
+			 }
+			path_node->parent->color = BLACK;
+			path_node->parent->parent->color = RED;
+			(left_fixup)?
+				right_rotate(tree, path_node->parent->parent) : left_rotate(tree, path_node->parent->parent);
 		}
 		
 	}
@@ -162,7 +149,7 @@ void rbt_insert(rb_tree_t *tree, int val){
 			path_node = path_node->right;
 		}
 	}
-	rb_insert_fixup(tree, new_node); 
+	rbt_insert_fixup(tree, new_node); 
 }
 
 
@@ -190,60 +177,38 @@ int rbt_find(rb_tree_t *tree, int val){
 }
 
 
-static void delete_fixup(rb_tree_t *tree, node_t *path_node){
-	while(path_node != tree->top && path_node->color == BLACK){
-		if(path_node == path_node->parent->left){
-			node_t *bro_node = path_node->parent->right;
-			if(bro_node->color == RED){
-				bro_node->color = BLACK;
-				path_node->parent->color = RED;
-				left_rotate(tree, path_node->parent);
-				bro_node = path_node->parent->right;
-			}
-			if(bro_node->left->color == BLACK && bro_node->right->color == BLACK){
+static void rbt_delete_fixup(rb_tree_t *tree, node_t *path_node){
+	while(path_node != NULL && path_node->color == BLACK){
+
+		int left_fixup = path_node == path_node->parent->left;
+		node_t *bro_node = (left_fixup)?
+			path_node->parent->right : path_node->parent->left;
+		void (*straight_rotate)(rb_tree_t*, node_t*) = (left_fixup)?
+			left_rotate : right_rotate;
+		void (*reverse_rotate)(rb_tree_t*, node_t*) = (left_fixup)?
+			right_rotate : left_rotate;
+		
+		if(bro_node->color == RED){
+			bro_node->color = BLACK;
+			path_node->parent->color = RED;
+			straight_rotate(tree, path_node->parent);
+			bro_node = (left_fixup)?
+				path_node->parent->right : path_node->parent->left;}
+		if(bro_node->left->color == BLACK && bro_node->right->color == BLACK){
+			bro_node->color = RED;
+			path_node = path_node->parent;}
+		else{
+			if(((left_fixup)? bro_node->right->color : bro_node->left->color) == BLACK){
+				(left_fixup)? (bro_node->left->color = BLACK) : (bro_node->right->color = BLACK);
 				bro_node->color = RED;
-				path_node = path_node->parent;
-			}
-			else{
-				if(bro_node->right->color == BLACK){
-					bro_node->left->color = BLACK;
-					bro_node->color = RED;
-					right_rotate(tree, bro_node);
-					bro_node = path_node->parent->right;
-				}
-				bro_node->color = path_node->parent->color;
-				path_node->parent->color = BLACK;
-				bro_node->right->color = BLACK;
-				left_rotate(tree, path_node->parent);
-				path_node = tree->top;
-			}
-		} else {
-			node_t *bro_node = path_node->parent->left;
-			if(bro_node->color == RED){
-				bro_node->color = BLACK;
-				path_node->parent->color = RED;
-				right_rotate(tree, path_node->parent);
-				bro_node = path_node->parent->left;
-			}
-			if(bro_node->right->color == BLACK && bro_node->left->color == BLACK){
-				bro_node->color =  RED;
-				path_node = path_node->parent;
-			}
-			else {
-				if(bro_node->left->color == BLACK){
-					bro_node->right->color = BLACK;
-					bro_node->color = RED;
-					left_rotate(tree, bro_node);
-					bro_node = path_node->parent->left;
-				}
-				bro_node->color = path_node->parent->color;
-				path_node->parent->color = BLACK;
-				bro_node->left->color = BLACK;
-				right_rotate(tree, path_node->parent);
-				path_node = tree->top;
-			}
-		}
-	} 	
+				reverse_rotate(tree, path_node->parent);
+				bro_node = (left_fixup)?
+					path_node->parent->right : path_node->parent->left;}
+			bro_node->color = path_node->parent->color;
+			path_node->parent->color = BLACK;
+			straight_rotate(tree, path_node->parent);
+			path_node = tree->top;}
+	}
 	path_node->color = BLACK;
 }
 
@@ -265,7 +230,6 @@ void rbt_delete(rb_tree_t *tree, int val){
 		take_parent(tree, rm_node, rm_node->left);}
 	else {
 		min_node = rb_minimum(rm_node->right);
-		fixup_node = rm_node->right;
 		fixup_color = min_node->color;
 		if(min_node->parent != rm_node){
 			take_parent(tree, min_node, min_node->right);
@@ -277,7 +241,7 @@ void rbt_delete(rb_tree_t *tree, int val){
 	}
 	free(rm_node);
 	if(fixup_color == BLACK)
-		delete_fixup(tree, fixup_node);
+		rbt_delete_fixup(tree, min_node->right);
 }
 
 
@@ -311,6 +275,7 @@ static int line_control(int *line_num, int *line_count, int *line_null_count){
 
 void rbt_print_preorder(rb_tree_t *tree){
 	printf("__preorder:__\n");
+
 	list_t *queue = create_list();
 	list_push_back(queue, tree->top);
 	
@@ -357,3 +322,5 @@ void rbt_clean(rb_tree_t *tree){
 	}
 	free(tree->nil);
 }
+
+

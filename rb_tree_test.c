@@ -15,6 +15,11 @@ int main(void){
 	rbt_delete(tree, 7);
 	rbt_print_postorder(tree);
 	rbt_print_preorder(tree);
+
+	rbt_insert(tree, 15);
+	rbt_print_postorder(tree);
+	rbt_print_preorder(tree);
+
 } 
 	
 /* [ids@archlinux cnpct]$ gcc rb_tree.c list.c rb_tree_test.c -o rb_tree_test.e -lm */
