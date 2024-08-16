@@ -1,0 +1,198 @@
+#+TITLE: Семинар 6.2. Условные переходы 
+#+AUTHOR: idsyr
+#+STARTUP: showeverything 
+#+OPTIONS: toc:2
+
+
+
+
+* Немного про goto (0:00)
+- Реалистичные микропроцессоры обычно имеют кроме регистров память и инструкции для работы с ней
+- Также они обычно поддерживают отдельные флаговые регистры и условные переходы в зависимости от состояния флаговых регистров
+- Это делает ассемблерную программу похожей на с-программу, активно использующую goto
+#+begin_src cpp
+	// Использование goto
+	int fact(int x){
+		int acc = x;
+		x-=1;
+		if(x<2) goto ret;
+	 loop:
+		acc = acc*x;
+		x-=1;
+		if(x>0) goto loop;
+	 ret:
+		return acc;
+	}
+#+end_src
+
+- Переход как концепция куда мощнее, чем циклы и ветвления
+#+begin_src cpp
+	// Две работающие сопрограммы
+	for(i = 0; i<UMAX; ++i){
+		if(upper_cond()) goto lower;
+	 upper:
+		upper_action();
+	}
+	for(j = 0; j<LMAX; ++j){
+		if(lower_cond()) goto upper;
+	 lower:
+		lower_action();
+	}
+#+end_src
+
+
+
+
+* goto considered harmful (7:55)
+- Структурная программа - состоящая только из ветвлений и условных переходов характеризуется предсказуемостью состояния
+- Все циклы вложены друг в друга - Сводимость графов
+- Важна последовательность действий - смоделировать можно сопостовляя текст программы и процесс ее исполнения
+
+
+
+
+* Условные переходы в x86 (11:29)
+- Почти каждая арифметическая операция выставляет флаги
+#+begin_src asm
+	add edx, e	ax // edx+=eax и ставит флаги по edx
+#+end_src
+
+- Две специальные операции сравнения: cmp и test
+#+begin_src asm
+	cmp  edx, 1 // ставит флаги как (edx - 1)
+	test edx, 1 // ставит флаги как (edx & 1)
+#+end_src
+
+- Регистр флагов содержит пять основных флагов: ZF, SF, OF, CF, PF
+ZF = [результат операции равен нулю]
+SF = [старщий бит результата]
+OF = [результат не помещается в destination]
+
+
+
+
+* 2-адические числа (снова) (14:30)
+_____INT_____
+00...000 = 0
+00...001 = 1
+00...010 = 2
+11...111 = -1
+11...110 = -2
+01...111 = INT_MAX
+10...000 = INT_MIN
+- Алгебраическое кольцо
+
+
+
+
+* Снова к условным переходам (20:14)
+- (обрыв 2-адических чисел (line 72)) Это представление знаковых целых - Two's complement (используется повсеместно)
+#+begin_src asm
+	cmp edx, 42
+	je	.L1  // ZF == 1
+	jl  .L2  // SF != OF
+	jle .L2  // ZF || SF != OF
+#+end_src
+
+
+
+
+* Беззнаковая арифметика (30:15)
+CF = [перенос в старший разряд или заем из него]
+010...000 + 010...000 = 100...000 // Carry to MSB
+100...000 - 010...000 = 010...000 // Borrow from MSB
+#+begin_src asm
+	cmp edx, 	42
+	je .L1  // ZF == 1
+	jl .L2  // SF != OF
+	jb .L2  // CF == 1  unsigned jl
+	jae .L2 // CF != 1 && ZF
+	jg  .L2  // (ZF == 0)
+	ja  .L2  // CF == 0 || ZF == 0
+	jbe .L2  // CF == 1 || ZF == 1
+#+end_src
+
+
+
+
+* Эффективный адрес (35:40)
+- BYTE WORD DWORD QWORD
+- DWORD PTR - разыменование
+- простая фунция
+#+begin_src cpp
+	int test(int *a, int n) {return a[n+2];}
+#+end_src
+- попытка адресовать имееи три компонента
+#+begin_src cpp
+	a[n+2] == *((char *)a + n * 4 + 2 * 4);
+	EA = BASE + INDEX * SCALE + OFFSET * SCALE
+#+end_src
+- Базой адреса или его индексом может быть регистр
+#+begin_src asm
+	mov eax, DWORD PTR [rdi + 8 + rsi * 4]
+#+end_src
+- Для этой операции сделали специальную инструкцию 
+#+begin_src asm
+	lea rax, [rdi + 8 + rsi * 4]
+#+end_src
+- Компиляторы вставляют lea для обычного сложения
+
+
+
+
+* Структура ассемблерного файла (AT&T)
+- Иммедиаты помечены $
+- Секции (.text)
+- Директивы (.globl) - внешняя видимость
+- Метки используются для вызова функций(fact:) и условных переходов
+- у movl обратный порядок
+- приставка l для 32 битных
+#+begin_src asm
+//AT&T
+	.text		
+	.globl fact	
+fact:
+	.cfi_startproc
+	movl 4(%esp), %edx
+	movl %edx, %eax
+	cmpl $1, %edx
+	jle  L1
+	movl $1, %eax
+L3:
+	imull %edx, %eax
+	subl $1, %edx
+	jne L3
+L1:
+	ret
+	.cfi_endproc
+
+//intel
+	.text
+	.globl fact
+fact:
+	.cfi_startproc
+	mov edx, DWORD PTR [esp+4]
+	mov eax, edx
+	cmp edx, 1
+	jle L1
+	mov eax, 1
+L3:
+	imul eax, edx
+	sub edx, 1
+	jne L3
+L1:
+	ret
+	.cfi_endproc
+#+end_src
+
+
+
+
+
+
+
+
+
+
+
+
