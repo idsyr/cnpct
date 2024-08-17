@@ -54,32 +54,32 @@
 * Условные переходы в x86 (11:29)
 - Почти каждая арифметическая операция выставляет флаги
 #+begin_src asm
-	add edx, e	ax // edx+=eax и ставит флаги по edx
+	add edx, eax  // edx+=eax и ставит флаги по edx
 #+end_src
 
 - Две специальные операции сравнения: cmp и test
 #+begin_src asm
-	cmp  edx, 1 // ставит флаги как (edx - 1)
-	test edx, 1 // ставит флаги как (edx & 1)
+	cmp  edx, 1  // ставит флаги как (edx - 1)
+	test edx, 1  // ставит флаги как (edx & 1)
 #+end_src
 
 - Регистр флагов содержит пять основных флагов: ZF, SF, OF, CF, PF
-ZF = [результат операции равен нулю]
-SF = [старщий бит результата]
-OF = [результат не помещается в destination]
+- ZF = [результат операции равен нулю]
+- SF = [старщий бит результата]
+- OF = [результат не помещается в destination]
 
 
 
 
 * 2-адические числа (снова) (14:30)
 _____INT_____
-00...000 = 0
-00...001 = 1
-00...010 = 2
-11...111 = -1
-11...110 = -2
-01...111 = INT_MAX
-10...000 = INT_MIN
+- 00...000 = 0
+- 00...001 = 1
+- 00...010 = 2
+- 11...111 = -1
+- 11...110 = -2
+- 01...111 = INT_MAX
+- 10...000 = INT_MIN
 - Алгебраическое кольцо
 
 
@@ -98,11 +98,11 @@ _____INT_____
 
 
 * Беззнаковая арифметика (30:15)
-CF = [перенос в старший разряд или заем из него]
-010...000 + 010...000 = 100...000 // Carry to MSB
-100...000 - 010...000 = 010...000 // Borrow from MSB
+- CF = [перенос в старший разряд или заем из него]
+- 010...000 + 010...000 = 100...000 // Carry to MSB
+- 100...000 - 010...000 = 010...000 // Borrow from MSB
 #+begin_src asm
-	cmp edx, 	42
+	cmp edx, 42
 	je .L1  // ZF == 1
 	jl .L2  // SF != OF
 	jb .L2  // CF == 1  unsigned jl
@@ -140,7 +140,7 @@ CF = [перенос в старший разряд или заем из нег�
 
 
 
-* Структура ассемблерного файла (AT&T)
+* Структура ассемблерного файла (AT&T) (40:37)
 - Иммедиаты помечены $
 - Секции (.text)
 - Директивы (.globl) - внешняя видимость
@@ -188,11 +188,135 @@ L1:
 
 
 
+* Кодировка инструкций на практике (46:00)
+#+begin_src cpp
+	int sub1(int x) {
+		return x - 10;}
+	// gcc -O1 -S -masm=intel subc.c
+#+end_src
+#+begin_src asm
+	lea eax, -10[rdi]
+#+end_src
+
+#+begin_src cpp
+	int sub1(int x, int y) {
+		return x - y;}
+	// gcc -O1 -S -masm=intel subs.c
+	// gcc -O1 -c -masm=intel subs.c
+	// objdump -d -M intel subs.c
+#+end_src
+#+begin_src asm
+	mov eax,edi
+	sub eax,esi
+	ret
+#+end_src
+
+#+begin_src cpp
+	int testbrn(int x, int y){
+		if(x==y) return 0;
+		return x*x-y*y+10;}
+#+end_src
+#+begin_src asm
+mov	eax, 0
+	cmp	edi, esi
+	je	.L2
+	imul	edi, edi
+	imul	esi, esi
+	sub	edi, esi
+	lea	eax, 10[rdi]
+.L2:
+	ret
+	.cfi_endproc
+#+end_src
+- ISA instruction set arch
 
 
 
 
+* Crackme (51:30)
+#+begin_src cpp
+	#include <stdio.h>
+	#include <stdlib.h>
+
+	int g_code_1;
+	int g_code_2;
+
+	int check(){return g_code_1 == g_code_2;}
+
+	int main(){
+		int code, res;
+		printf("Enter code: ");
+		res = scanf("%d", &code);
+		if(!res) abort();
+		g_code_1 = code;
+		g_code_2 = code + 1;
+		if(!check()) abort();
+		printf("Victory\n");
+	}
+	// gcc -O1 hack_example.c -o hack_example.e
+	// objdump -d -M intel ./hack_example.e > hack_example.dis
+	// je(74) -> jne(75) 
+#+end_src
+- адрес   кодировка   инструкция   операнды
+- 4015c6  83 ec 20    sub          esp,0x20
+- 74 2b -> адрес + 2b 
 
 
 
+
+* Проблемы редактирования ассемблера (1:02:10)
+- В машинном коде все смещения посчитаны и проставлены
+- Если изменить размер инструкции или вставить новую то понадобиться вручную менять смещения для всех затронутых переходов
+
+
+
+
+* Problem AGF (распознание простой функции) (1:10:55)
+#+begin_src asm
+	.global foo
+	.type foo, @function
+foo:            
+	mov eax,edi   
+	imul eax,edi  
+	imul eax,edi  
+	test eax,eax   
+	js .L4
+	ret
+.L4:
+	imul esi,esi
+	add edi,edi
+	mov edx,17
+	sub edx,edi
+	sub edx,esi
+	add eax,edx
+	ret
+#+end_src
+
+#+begin_src cpp
+	int foo(int x, int y){
+		int x_pow3 = x*x*x;
+		if(x_pow3 > 0) return x_pow3;
+		return x_pow3 + 17 - x*2 - y*y;
+	}
+	// gcc -S foo.c -O1 -masm=intel
+#+end_src
+
+#+begin_src asm
+foo:
+.LFB0:
+	.cfi_startproc
+	mov	eax, edi
+	imul	eax, edi
+	imul	eax, edi
+	test	eax, eax
+	jg	.L1
+	add	eax, 17
+	add	edi, edi
+	sub	eax, edi
+	imul	esi, esi
+	sub	eax, esi
+.L1:
+	ret
+	.cfi_endproc
+#+end_src
 
