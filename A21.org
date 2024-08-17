@@ -189,35 +189,45 @@ L1:
 
 
 * Кодировка инструкций на практике (46:00)
+** Пример 1:
 #+begin_src cpp
 	int sub1(int x) {
 		return x - 10;}
-	// gcc -O1 -S -masm=intel subc.c
 #+end_src
+- gcc -O1 -S -masm=intel subc.c
 #+begin_src asm
 	lea eax, -10[rdi]
 #+end_src
 
+
+
+** Пример 2:
 #+begin_src cpp
 	int sub1(int x, int y) {
 		return x - y;}
-	// gcc -O1 -S -masm=intel subs.c
-	// gcc -O1 -c -masm=intel subs.c
-	// objdump -d -M intel subs.c
 #+end_src
+- gcc -O1 -S -masm=intel subs.c
+- gcc -O1 -c -masm=intel subs.c
+- objdump -d -M intel subs.c
 #+begin_src asm
 	mov eax,edi
 	sub eax,esi
 	ret
 #+end_src
 
+
+
+** Пример 3:
 #+begin_src cpp
 	int testbrn(int x, int y){
 		if(x==y) return 0;
 		return x*x-y*y+10;}
 #+end_src
+- gcc -O1 -S -masm=intel subs.c
+- gcc -O1 -c -masm=intel subs.c
+- objdump -d -M intel subs.c
 #+begin_src asm
-mov	eax, 0
+	mov	eax, 0
 	cmp	edi, esi
 	je	.L2
 	imul	edi, edi
@@ -253,12 +263,13 @@ mov	eax, 0
 		if(!check()) abort();
 		printf("Victory\n");
 	}
-	// gcc -O1 hack_example.c -o hack_example.e
-	// objdump -d -M intel ./hack_example.e > hack_example.dis
-	// je(74) -> jne(75) 
 #+end_src
-- адрес   кодировка   инструкция   операнды
-- 4015c6  83 ec 20    sub          esp,0x20
+- gcc -O1 hack_example.c -o hack_example.e
+- objdump -d -M intel ./hack_example.e > hack_example.dis
+- hexl-mode
+- je(74) -> jne(75) 
+| адрес  | кодировка | инструкция | операнды |
+| 4015c6 | 83 ec 20  | sub        | esp,0x20 |
 - 74 2b -> адрес + 2b 
 
 
@@ -272,6 +283,7 @@ mov	eax, 0
 
 
 * Problem AGF (распознание простой функции) (1:10:55)
+- AGF src:
 #+begin_src asm
 	.global foo
 	.type foo, @function
@@ -291,16 +303,15 @@ foo:
 	add eax,edx
 	ret
 #+end_src
-
+- disasm
 #+begin_src cpp
 	int foo(int x, int y){
 		int x_pow3 = x*x*x;
 		if(x_pow3 > 0) return x_pow3;
 		return x_pow3 + 17 - x*2 - y*y;
 	}
-	// gcc -S foo.c -O1 -masm=intel
 #+end_src
-
+- gcc -S foo.c -O1 -masm=intel
 #+begin_src asm
 foo:
 .LFB0:
