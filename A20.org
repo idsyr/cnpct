@@ -1,0 +1,108 @@
+#+TITLE: Семинар 6.1. Изобретаем ассемблер
+#+AUTHOR: idsyr
+#+STARTUP: showeverything
+#+OPTIONS: toc:2
+
+
+
+
+* Микрокалькуляторы (00:00)
+
+| MOVI | D,i   |
+| ADD  | rx,rs |
+| SUB  | rx,rs |
+| MUL  | rx,rs |
+| DIV  | rx,rs |
+| IN   | rd    |
+| OUT  | rs    |
+
+
+
+
+* Придумываем кодировку (05:05)
+
+| MOVI | I   | 0IIIIIII |
+| ADD  | R,R | 1000RRRR |
+| SUB  | R,R | 1001RRRR |
+| MUL  | R,R | 1010RRRR |
+| DIV  | R,R | 1011RRRR |
+| IN   | R   | 110000RR |
+| OUT  | R   | 110001RR |
+
+
+
+
+* Программа на asm (13:53)
+- f(x) = (x+100)*(y+3)
+- Object code:
+#+begin_src asm
+  IN A
+  MOVI 100
+  ADD A,D
+  IN B
+  MOVI 3
+  ADD B,D
+  MUL A,B
+  OUT A
+#+end_src
+- Мнемоническое представление ассемблера зависит от системы команд
+- Бинарный код зависит от кодировки команд
+
+
+
+* Три задачи: encoder, decoder, simulator (21:50)
+- Problem AS
+- Problem AS2
+- Problem MK
+
+
+
+* Регистры и система команд в x86 (26:55)
+
+| rax         | accumulator            |
+| rbx         | pointer to data ds (-) |
+| rcx         | loop counter           |
+| rdx         | pointer i/o (-)        |
+| rbp         | frame pointer          |
+| rsp         | stack pointer          |
+| rsi         | operand string op      |
+| rdi         | result string op       |
+| r8-r15      | просто регистры        |
+| eflags      | flag registr           |
+| eip         | instruction ptr        |
+| cs          | code segment           |
+| ss          | stack segment          |
+| ds,es,fs,gs | data segment           |
+| cr0,dr0     | system part            |
+| mm0,xmm0    | ext                    |
+
+- r.x - 64bit
+- e.x - 32bit
+-  .x - 16bit
+-  .h - high 8bit
+-  .l - low  8bit
+
+- RAX -> EAX -> AX  -> AL
+- RSI -> ESI -> SI  -> SIL
+- R8  -> R8D -> R8W -> R8B
+
+
+
+
+* Problem AS2 live coding (39:30)
+
+
+
+
+* Условные переходы (01:11:10)
+- Условный переход происходит как после явного сравнения
+#+begin_src asm
+	cmp edx, 1 ;; if(x<=1) goto L1 
+	jle L1
+#+end_src
+- Так и после обычной арифметики
+#+begin_src asm
+	sub edx, 1 ;; x-=1;
+	jne L3     ;; if(x!=0) goto L3
+#+end_src    
+- Почти каждая арифметическая операция выставляет флаги
