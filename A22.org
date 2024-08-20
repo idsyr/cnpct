@@ -1,0 +1,234 @@
+#+TITLE: Семинар 6.3. Вызов функций в ассемблере x86 и ABI
+#+AUTHOR: idsyr
+#+STARTUP: showeverything
+#+OPTIONS: toc:2
+
+
+
+
+* Что такое вызов функции (00:00)
+- На уровне ассемблера никаких функций не существует, только переходы
+- Поэтому нужно договорится куда складывать параметры и где хранить возвращаемое значение
+#+begin_src cpp
+  int foo(int x, int y){return x+y;}
+#+end_src
+#+begin_src asm
+	lea eax, [rdi + rsi]
+  ret  
+#+end_src
+- В x86 обычно аргументы на регистрах, адрес возрата в стеке
+#+begin_src cpp
+int callfoo(int a, int b){
+	return foo(b, a) + b;}
+#+end_src
+#+begin_src asm
+callfoo:    ;; edi = a, esi = b
+  push rbx  ;; save rbx on stack
+  mov ebx, esi
+  mov edi, ebx
+  call foo  
+  add eax, ebx
+  pop rbx
+  ret
+#+end_src
+- Кто чистит стек? Вызывающая или вызываемая?
+- На каких регистрах передаем значения?
+- Где возвращаемое значение?
+- Порядок размещения на стеке аргументов (l->r/r->l)
+- Какие обязуемся восстановить и какие можем портить?
+
+
+
+
+* Конвенции вызова и удобные инструкции (09:00)
+- ABI - описание использования регистров при вызвове функций
+- system V AMD64 ABI
+- push reg
+#+begin_src asm
+	add rsp, size
+  mov DWORD PTR [rsp], reg
+#+end_src
+- pop reg
+#+begin_src asm
+	mov reg, DWORD PTR [rsp]
+  sub rsp, size
+#+end_src
+- call func 
+#+begin_src asm
+	push return_addr
+  jmp func
+#+end_src
+- ret
+#+begin_src asm
+	pop return-addr
+  jmp return-addr
+#+end_src
+
+
+
+
+* Callee-saved && caller-saved регистры (14:25)
+- caller-saved - вызывающая функция обязана вокруг вызова сохранить и восстановить caller-saved регистры которые у нее сейчас активны
+#+begin_src asm
+callfoo:
+  ;; .... set(r10)
+  push r10  ;; caller-saved
+  call foo
+  pop r10
+  ;; .... use(r10)
+  ret
+#+end_src
+
+- callee-saved - вызываемая функция обязана в прологе и эпилоге сохранить те callee-saved регистры которые она использует
+#+begin_src asm
+callfoo:
+  push rbx ;; calle-saved
+  ;; .... set(rbx)
+  call foo
+  ;; .... use(rbx)
+  pop rbx
+  ret
+#+end_src
+
+- calle-saved не выгодны:
+#+begin_src cpp
+func 1:
+  for(...){
+		push cd
+    foo();
+    pop cd
+	}
+#+end_src
+
+- caller-saved не выгодны:
+#+begin_src cpp
+  push ce
+  if(...) return;
+  ...
+  pop ce
+#+end_src
+
+- rsp только callee-saved
+- args - caller
+
+
+
+
+* System V ABI (27:50)
+- Существует довольно много разных конвенций вызова
+- Разумный стандапт де-факто под Unix системами это System V ABI
+- Аргументы закладываются справа налево
+- Очистку передаваемых аргументов делает caller
+- Особое место играет пара rbp / rsp для формирования фрейма
+
+| rax | caller | ret#1       |
+| rbx | callee |             |
+| rcx | caller | arg#4       |
+| rdx | caller | arg#3 ret#2 |
+| rbp | callee | fp          |
+| rsp | callee | sp          |
+| rsi | caller | arg#2       |
+| rdi | caller | arg#1       |
+| r8  | caller | arg#5       |
+| r9  | caller | arg#6       |
+| r10 | caller |             |
+| r11 | caller |             |
+| r12 | callee |             |
+| r13 | callee |             |
+| r14 | callee |             |
+| r15 | callee |             |
+
+- (gdb) disassemble
+- (gdb) x/4xg $rsp
+- (gdb) stepi 3
+
+
+
+
+* tricks (35:35)
+- char/short берут полный регистр
+#+begin_src asm
+	movsx esi, si
+  movsx edi, dil
+#+end_src
+- при нехватке регистров идет через стек
+#+begin_src asm
+	movsx rax, DWORD PTR 8[rsp] ;; rsp - return addr, rsp+8 - arg
+#+end_src
+- если у .c и .s общий ABI
+#+begin_src bash
+gcc one.c two.s 
+#+end_src
+
+
+
+
+* (44:10)
+- Problem AP 
+- Problem AGS
+
+
+
+
+* inline assembler (46:10)
+#+begin_src cpp
+unsigned popcnt(unsigned n){
+	unsigned mask = 1u << 31, cnt = 0;
+	do{
+		cnt+=((n&mask) == mask);
+	} while((mask = mask >> 1) != 0);
+	return cnt;
+}
+#+end_src
+- Но в x86 есть инструкция popcnt
+#+begin_src cpp
+unsigned popcnt(unsigned n){
+	unsigned cnt;
+	asm("popcnt %0, %1":"=r"(cnt):"r"(n));
+	// r - register (read)
+	// = - destination (write)
+  // + - (write and read)
+	return cnt;
+}
+#+end_src
+- asm qualifiers (template : output : input : clobber);
+- clobber - caller-saved регистры которые порятятся
+- Пример вызова функции 
+#+begin_src cpp
+asm("mov edi, %1\n\tcall fact\n\tmov %0, eax":"=r"(res):"r"(y):"eax"); 
+#+end_src
+- не на всех x86
+
+
+
+
+* Альтернативы ассемблеру
+#+begin_src cpp
+unsigned popcnt(unsigned n){
+	return __builtin_popcount(n);
+}
+#+end_src
+- если инструкция есть - popcnt
+- если нет - цикл
+- Компилятор может сматчить разумную реализацию если узнает ее
+#+begin_src cpp
+unsigned popcnt(unsigned n){
+	unsigned cnt = 0;
+	while(n){
+		n&=n-1;
+		cnt++;
+	}
+	return cnt;
+}
+// gcc -O2 -march=tigerlake
+// gcc -O2 -march=native
+#+end_src
+- 1:03:15
+
+
+
+
+* Problem AP live coding (1:07:40)
+
+
+
