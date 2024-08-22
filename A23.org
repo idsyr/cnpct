@@ -18,7 +18,7 @@
 #+end_src
 #+begin_src asm
   lea eax, [rdi + rsi]
-	ret
+  ret
 #+end_src
 - Естественный способ трактовать огрниченное число бит: как натуральное число. Можно легко закодировать целые.
 ** Но что делать с вещественными числами?
@@ -74,7 +74,7 @@
 #+begin_src cpp
 float x = 1.0f;
 unsigned uval = (unsigned) x; // i == 1
-unsigned u = *(unsigned*) &x; // i == 0x3f800000 strict aliasing violation
+unsigned u = *(unsigned*) &x; // i == 0x3f800000 (!) strict aliasing violation
 #+end_src
 ** Приведение может быть:
 - К байтам: char*, unsigned char*, ...
@@ -92,7 +92,7 @@ unsigned u = *(unsigned*) &x; // i == 0x3f800000 strict aliasing violation
 
 * Округления (45:10)
 - unit in last place
-- ulp(1.0f)
+- ulp(1.0f):
 #+begin_src cpp 
 float d0, d1;
 d0 = 1.0f;
@@ -100,7 +100,7 @@ d1 = nextafterf(d0, d0+1.0f);
 printf("%.8f", d1 - d0);
 #+end_src
 - Все вычисления над парой чисел z = x (op) y должны быть округлены в пределах 0.5 * ulp(z)
-- Округлять можно вверх, вниз, к нулю, к ближайшему
+- Округлять можно вверх, вниз, к нулю, к ближайшему:
 #+begin_src cpp
 float a = 1.0, b = 3.0;
 fesetround(FE_UPWARD);
@@ -126,11 +126,11 @@ fesetround(FE_TOWARDZERO);
 #+begin_src cpp
 double foo(double f1, double f2) {
 	double f3;     // fld1 - инструкция чтобы поместить 1.0 на верхушку стека fpu
-	f1 = 1.0 - f1; // fsub QWORD PTR [esp+4] - st0 -=mem
+	f1 = 1.0 - f1; // fsub QWORD PTR [esp+4]   // st0 -=mem
 	f1 = f2 * f1;  // fmul QWORD PTR [esp+12]
-	f3 = f1 / 3.0; // fld st(0) - st1 = st0, st0 = st0
+	f3 = f1 / 3.0; // fld st(0)                // st1 = st0, st0 = st0
 	f2 = f1 + f3;  // fdiv DWORD PTR .LC1
-	return f2;     // faddp st(1), st  -  st1 += st0, pop st
+	return f2;     // faddp st(1), st          // st1 += st0, pop st
 }                ///// st - fpu stack
 #+end_src
 - сопроцессор с отдельным стеком это историческая редкость
@@ -153,7 +153,7 @@ double foo(double f1, double f2) {
 * Расширения в System V ABI (1:08:53)
 - args: xmm0-15 
 - ret: xmm0 
-- cvtsi2ss/cvttss2si
+- cvtsi2ss / cvttss2si
 
 
 
