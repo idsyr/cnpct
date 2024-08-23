@@ -11,33 +11,33 @@
 - Также они обычно поддерживают отдельные флаговые регистры и условные переходы в зависимости от состояния флаговых регистров
 - Это делает ассемблерную программу похожей на с-программу, активно использующую goto
 #+begin_src cpp
-	// Использование goto
-	int fact(int x){
-		int acc = x;
-		x-=1;
-		if(x<2) goto ret;
-	 loop:
-		acc = acc*x;
-		x-=1;
-		if(x>0) goto loop;
-	 ret:
-		return acc;
-	}
+  // Использование goto
+  int fact(int x){
+    int acc = x;
+    x-=1;
+    if(x<2) goto ret;
+   loop:
+    acc = acc*x;
+    x-=1;
+    if(x>0) goto loop;
+   ret:
+    return acc;
+  }
 #+end_src
 
 - Переход как концепция куда мощнее, чем циклы и ветвления
 #+begin_src cpp
-	// Две работающие сопрограммы
-	for(i = 0; i<UMAX; ++i){
-		if(upper_cond()) goto lower;
-	 upper:
-		upper_action();
-	}
-	for(j = 0; j<LMAX; ++j){
-		if(lower_cond()) goto upper;
-	 lower:
-		lower_action();
-	}
+  // Две работающие сопрограммы
+  for(i = 0; i<UMAX; ++i){
+    if(upper_cond()) goto lower;
+   upper:
+    upper_action();
+  }
+  for(j = 0; j<LMAX; ++j){
+    if(lower_cond()) goto upper;
+   lower:
+    lower_action();
+  }
 #+end_src
 
 
@@ -54,13 +54,13 @@
 * Условные переходы в x86 (11:29)
 - Почти каждая арифметическая операция выставляет флаги
 #+begin_src asm
-	add edx, eax  // edx+=eax и ставит флаги по edx
+  add edx, eax  // edx+=eax и ставит флаги по edx
 #+end_src
 
 - Две специальные операции сравнения: cmp и test
 #+begin_src asm
-	cmp  edx, 1  // ставит флаги как (edx - 1)
-	test edx, 1  // ставит флаги как (edx & 1)
+  cmp  edx, 1  // ставит флаги как (edx - 1)
+  test edx, 1  // ставит флаги как (edx & 1)
 #+end_src
 
 - Регистр флагов содержит пять основных флагов: ZF, SF, OF, CF, PF
@@ -88,10 +88,10 @@ _____INT_____
 * Снова к условным переходам (20:14)
 - (обрыв 2-адических чисел (line 72)) Это представление знаковых целых - Two's complement (используется повсеместно)
 #+begin_src asm
-	cmp edx, 42
-	je	.L1  // ZF == 1
-	jl  .L2  // SF != OF
-	jle .L2  // ZF || SF != OF
+  cmp edx, 42
+  je  .L1  // ZF == 1
+  jl  .L2  // SF != OF
+  jle .L2  // ZF || SF != OF
 #+end_src
 
 
@@ -102,14 +102,14 @@ _____INT_____
 - 010...000 + 010...000 = 100...000 // Carry to MSB
 - 100...000 - 010...000 = 010...000 // Borrow from MSB
 #+begin_src asm
-	cmp edx, 42
-	je .L1  // ZF == 1
-	jl .L2  // SF != OF
-	jb .L2  // CF == 1  unsigned jl
-	jae .L2 // CF != 1 && ZF
-	jg  .L2  // (ZF == 0)
-	ja  .L2  // CF == 0 || ZF == 0
-	jbe .L2  // CF == 1 || ZF == 1
+  cmp edx, 42
+  je .L1  // ZF == 1
+  jl .L2  // SF != OF
+  jb .L2  // CF == 1  unsigned jl
+  jae .L2 // CF != 1 && ZF
+  jg  .L2  // (ZF == 0)
+  ja  .L2  // CF == 0 || ZF == 0
+  jbe .L2  // CF == 1 || ZF == 1
 #+end_src
 
 
@@ -120,20 +120,20 @@ _____INT_____
 - DWORD PTR - разыменование
 - простая фунция
 #+begin_src cpp
-	int test(int *a, int n) {return a[n+2];}
+  int test(int *a, int n) {return a[n+2];}
 #+end_src
 - попытка адресовать имееи три компонента
 #+begin_src cpp
-	a[n+2] == *((char *)a + n * 4 + 2 * 4);
-	EA = BASE + INDEX * SCALE + OFFSET * SCALE
+  a[n+2] == *((char *)a + n * 4 + 2 * 4);
+  EA = BASE + INDEX * SCALE + OFFSET * SCALE
 #+end_src
 - Базой адреса или его индексом может быть регистр
 #+begin_src asm
-	mov eax, DWORD PTR [rdi + 8 + rsi * 4]
+  mov eax, DWORD PTR [rdi + 8 + rsi * 4]
 #+end_src
 - Для этой операции сделали специальную инструкцию 
 #+begin_src asm
-	lea rax, [rdi + 8 + rsi * 4]
+  lea rax, [rdi + 8 + rsi * 4]
 #+end_src
 - Компиляторы вставляют lea для обычного сложения
 
@@ -149,40 +149,40 @@ _____INT_____
 - приставка l для 32 битных
 #+begin_src asm
 //AT&T
-	.text		
-	.globl fact	
+  .text    
+  .globl fact  
 fact:
-	.cfi_startproc
-	movl 4(%esp), %edx
-	movl %edx, %eax
-	cmpl $1, %edx
-	jle  L1
-	movl $1, %eax
+  .cfi_startproc
+  movl 4(%esp), %edx
+  movl %edx, %eax
+  cmpl $1, %edx
+  jle  L1
+  movl $1, %eax
 L3:
-	imull %edx, %eax
-	subl $1, %edx
-	jne L3
+  imull %edx, %eax
+  subl $1, %edx
+  jne L3
 L1:
-	ret
-	.cfi_endproc
+  ret
+  .cfi_endproc
 
 //intel
-	.text
-	.globl fact
+  .text
+  .globl fact
 fact:
-	.cfi_startproc
-	mov edx, DWORD PTR [esp+4]
-	mov eax, edx
-	cmp edx, 1
-	jle L1
-	mov eax, 1
+  .cfi_startproc
+  mov edx, DWORD PTR [esp+4]
+  mov eax, edx
+  cmp edx, 1
+  jle L1
+  mov eax, 1
 L3:
-	imul eax, edx
-	sub edx, 1
-	jne L3
+  imul eax, edx
+  sub edx, 1
+  jne L3
 L1:
-	ret
-	.cfi_endproc
+  ret
+  .cfi_endproc
 #+end_src
 
 
@@ -191,52 +191,52 @@ L1:
 * Кодировка инструкций на практике (46:00)
 ** Пример 1:
 #+begin_src cpp
-	int sub1(int x) {
-		return x - 10;}
+  int sub1(int x) {
+    return x - 10;}
 #+end_src
 - gcc -O1 -S -masm=intel subc.c
 #+begin_src asm
-	lea eax, -10[rdi]
+  lea eax, -10[rdi]
 #+end_src
 
 
 
 ** Пример 2:
 #+begin_src cpp
-	int sub1(int x, int y) {
-		return x - y;}
+  int sub1(int x, int y) {
+    return x - y;}
 #+end_src
 - gcc -O1 -S -masm=intel subs.c
 - gcc -O1 -c -masm=intel subs.c
 - objdump -d -M intel subs.c
 #+begin_src asm
-	mov eax,edi
-	sub eax,esi
-	ret
+  mov eax,edi
+  sub eax,esi
+  ret
 #+end_src
 
 
 
 ** Пример 3:
 #+begin_src cpp
-	int testbrn(int x, int y){
-		if(x==y) return 0;
-		return x*x-y*y+10;}
+  int testbrn(int x, int y){
+    if(x==y) return 0;
+    return x*x-y*y+10;}
 #+end_src
 - gcc -O1 -S -masm=intel subs.c
 - gcc -O1 -c -masm=intel subs.c
 - objdump -d -M intel subs.c
 #+begin_src asm
-	mov	eax, 0
-	cmp	edi, esi
-	je	.L2
-	imul	edi, edi
-	imul	esi, esi
-	sub	edi, esi
-	lea	eax, 10[rdi]
+  mov  eax, 0
+  cmp  edi, esi
+  je  .L2
+  imul  edi, edi
+  imul  esi, esi
+  sub  edi, esi
+  lea  eax, 10[rdi]
 .L2:
-	ret
-	.cfi_endproc
+  ret
+  .cfi_endproc
 #+end_src
 - ISA instruction set arch
 
@@ -245,24 +245,24 @@ L1:
 
 * Crackme (51:30)
 #+begin_src cpp
-	#include <stdio.h>
-	#include <stdlib.h>
+  #include <stdio.h>
+  #include <stdlib.h>
 
-	int g_code_1;
-	int g_code_2;
+  int g_code_1;
+  int g_code_2;
 
-	int check(){return g_code_1 == g_code_2;}
+  int check(){return g_code_1 == g_code_2;}
 
-	int main(){
-		int code, res;
-		printf("Enter code: ");
-		res = scanf("%d", &code);
-		if(!res) abort();
-		g_code_1 = code;
-		g_code_2 = code + 1;
-		if(!check()) abort();
-		printf("Victory\n");
-	}
+  int main(){
+    int code, res;
+    printf("Enter code: ");
+    res = scanf("%d", &code);
+    if(!res) abort();
+    g_code_1 = code;
+    g_code_2 = code + 1;
+    if(!check()) abort();
+    printf("Victory\n");
+  }
 #+end_src
 - gcc -O1 hack_example.c -o hack_example.e
 - objdump -d -M intel ./hack_example.e > hack_example.dis
@@ -285,49 +285,49 @@ L1:
 * Problem AGF (распознание простой функции) (1:10:55)
 - AGF src:
 #+begin_src asm
-	.global foo
-	.type foo, @function
+  .global foo
+  .type foo, @function
 foo:            
-	mov eax,edi   
-	imul eax,edi  
-	imul eax,edi  
-	test eax,eax   
-	js .L4
-	ret
+  mov  eax,edi   
+  imul eax,edi  
+  imul eax,edi  
+  test eax,eax   
+  js   .L4
+  ret
 .L4:
-	imul esi,esi
-	add edi,edi
-	mov edx,17
-	sub edx,edi
-	sub edx,esi
-	add eax,edx
-	ret
+  imul esi,esi
+  add  edi,edi
+  mov  edx,17
+  sub  edx,edi
+  sub  edx,esi
+  add  eax,edx
+  ret
 #+end_src
 - disasm
 #+begin_src cpp
-	int foo(int x, int y){
-		int x_pow3 = x*x*x;
-		if(x_pow3 > 0) return x_pow3;
-		return x_pow3 + 17 - x*2 - y*y;
-	}
+  int foo(int x, int y){
+    int x_pow3 = x*x*x;
+    if(x_pow3 > 0) return x_pow3;
+    return x_pow3 + 17 - x*2 - y*y;
+  }
 #+end_src
 - gcc -S foo.c -O1 -masm=intel
 #+begin_src asm
 foo:
 .LFB0:
-	.cfi_startproc
-	mov	eax, edi
-	imul	eax, edi
-	imul	eax, edi
-	test	eax, eax
-	jg	.L1
-	add	eax, 17
-	add	edi, edi
-	sub	eax, edi
-	imul	esi, esi
-	sub	eax, esi
+  .cfi_startproc
+  mov   eax, edi
+  imul  eax, edi
+  imul  eax, edi
+  test  eax, eax
+  jg    .L1
+  add   eax, 17
+  add   edi, edi
+  sub   eax, edi
+  imul  esi, esi
+  sub   eax, esi
 .L1:
-	ret
-	.cfi_endproc
+  ret
+  .cfi_endproc
 #+end_src
 

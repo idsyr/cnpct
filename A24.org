@@ -34,37 +34,37 @@
 * Необычные режимы адресации (14:00)
 - Обращение по адресу
 #+begin_src asm
-	ldr x0, [x1] ;; x0 = *x1
+  ldr x0, [x1] ;; x0 = *x1
 #+end_src
 - Адресация со смещением 
 #+begin_src asm
-	ldr x19, [sp, 16] ;; x19 = *(sp + 16)
+  ldr x19, [sp, 16] ;; x19 = *(sp + 16)
 #+end_src
 - Преиндексная адресация
 #+begin_src asm
-	ldr x1, [x3, 16]! ;; x3 +=16; x1 =*x3
+  ldr x1, [x3, 16]! ;; x3 +=16; x1 =*x3
 #+end_src
 - Постиндексная адресация
 #+begin_src asm
-	ldr x5, [x7], 16 ;; x5 = *x7; x7 +=16
+  ldr x5, [x7], 16 ;; x5 = *x7; x7 +=16
 #+end_src
 - Адресация со сдвигом
 #+begin_src asm
-	ldr x0, [x1. x2. lsl 16] ;; w0 = *(x1 + x2 << 16);
+  ldr x0, [x1. x2. lsl 16] ;; w0 = *(x1 + x2 << 16);
 #+end_src
 - Адресация с расширением
 #+begin_src asm
-	ldr w0, [x0, w1, sxtw 2] ;; w0 = *(x0 + sext(w1) << 2);
+  ldr w0, [x0, w1, sxtw 2] ;; w0 = *(x0 + sext(w1) << 2);
 #+end_src
 - Загрузка сразу двух регистров
 #+begin_src asm
-	ldp x29, x30, [sp], 32 ;; x29 = *(sp);
-	                       ;; x30 = *(sp + 8);
-	                       ;; sp +=32
+  ldp x29, x30, [sp], 32 ;; x29 = *(sp);
+                         ;; x30 = *(sp + 8);
+                         ;; sp +=32
 #+end_src
 - PC-relative адресация (загрузка констант с абсолютным адресом)
 #+begin_src asm
-	ldr x1, =num
+  ldr x1, =num
 #+end_src
 
 
@@ -77,12 +77,12 @@ int gret() { return gsym; }
 #+end_src
 - в x86 породит (чтобы влезть в кодировку) попытку дотянуться от rip:
 #+begin_src asm
-	mov eax, DWORD PTR gsym[rip] ;; pc-relative
+  mov eax, DWORD PTR gsym[rip] ;; pc-relative
 #+end_src
 - в x86 если не дотянуться решает линкер (переложит поближе). В arm есть способ:
 #+begin_src asm
-	adrp x0, gsym ;; загрузка адреса страницы (адрес символа с точностью до 4 кб (12bit))
-	ldr w0, [x0, #:lo12:gsym]
+  adrp x0, gsym ;; загрузка адреса страницы (адрес символа с точностью до 4 кб (12bit))
+  ldr w0, [x0, #:lo12:gsym]
 #+end_src
 
 
@@ -159,9 +159,9 @@ int df(int x, int y) { return (x < y) ? x : y; }
 enum { N = 256 };
 int a[N], b[N], c[N];
 void foo(){
-	int i;
-	for(i = 0; i<N; ++i)
-		a[i] = b[i] + c[i];
+  int i;
+  for(i = 0; i<N; ++i)
+    a[i] = b[i] + c[i];
 }
 #+end_src
 #+begin_src asm
@@ -179,12 +179,12 @@ foo:
 - Компилятор не сделает этого для:
 #+begin_src cpp
 int find(const int *a, int n, int x){
-	int i;
+  int i;
 
-	for(i = 0; i<n; i++)
-		if(a[i] == x)
-			return i;
-	return -1;
+  for(i = 0; i<n; i++)
+    if(a[i] == x)
+      return i;
+  return -1;
 }
 #+end_src
 
@@ -194,17 +194,17 @@ int find(const int *a, int n, int x){
 - ускорение более чем втрое:
 #+begin_src cpp
 int find_simd(const int *a, int n, int x){
-	int i, mainsz = (n / 4) * 4;
-	__mm128i v = _mm_set1_epi32(x); // broadcast, all 4 32 of v is x
-	for(i = 0l i<mainsz; i+=4){
-		__m128i u = _mm_cmp_epi32_mask(v, u, _MM_CMPINT_EQ);
-		if(m != 0)
-			return i + __buitin_ctz(mask);
-	}
-	for( i = mainsz; i<n; i+=1)
-		if(a[i] == x)
-			return i;
-	return -1;
+  int i, mainsz = (n / 4) * 4;
+  __mm128i v = _mm_set1_epi32(x); // broadcast, all 4 32 of v is x
+  for(i = 0l i<mainsz; i+=4){
+    __m128i u = _mm_cmp_epi32_mask(v, u, _MM_CMPINT_EQ);
+    if(m != 0)
+      return i + __buitin_ctz(mask);
+  }
+  for( i = mainsz; i<n; i+=1)
+    if(a[i] == x)
+      return i;
+  return -1;
 }
 #+end_src
 

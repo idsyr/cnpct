@@ -97,12 +97,12 @@
 * Условные переходы (01:11:10)
 - Условный переход происходит как после явного сравнения
 #+begin_src asm
-	cmp edx, 1 ;; if(x<=1) goto L1 
-	jle L1
+  cmp edx, 1 ;; if(x<=1) goto L1 
+  jle L1
 #+end_src
 - Так и после обычной арифметики
 #+begin_src asm
-	sub edx, 1 ;; x-=1;
-	jne L3     ;; if(x!=0) goto L3
+  sub edx, 1 ;; x-=1;
+  jne L3     ;; if(x!=0) goto L3
 #+end_src    
 - Почти каждая арифметическая операция выставляет флаги

@@ -13,13 +13,13 @@
   int foo(int x, int y){return x+y;}
 #+end_src
 #+begin_src asm
-	lea eax, [rdi + rsi]
+  lea eax, [rdi + rsi]
   ret  
 #+end_src
 - В x86 обычно аргументы на регистрах, адрес возрата в стеке
 #+begin_src cpp
 int callfoo(int a, int b){
-	return foo(b, a) + b;}
+  return foo(b, a) + b;}
 #+end_src
 #+begin_src asm
 callfoo:    ;; edi = a, esi = b
@@ -45,22 +45,22 @@ callfoo:    ;; edi = a, esi = b
 - system V AMD64 ABI
 - push reg
 #+begin_src asm
-	add rsp, size
+  add rsp, size
   mov DWORD PTR [rsp], reg
 #+end_src
 - pop reg
 #+begin_src asm
-	mov reg, DWORD PTR [rsp]
+  mov reg, DWORD PTR [rsp]
   sub rsp, size
 #+end_src
 - call func 
 #+begin_src asm
-	push return_addr
+  push return_addr
   jmp func
 #+end_src
 - ret
 #+begin_src asm
-	pop return-addr
+  pop return-addr
   jmp return-addr
 #+end_src
 
@@ -94,10 +94,10 @@ callfoo:
 #+begin_src cpp
 func 1:
   for(...){
-		push cd
+    push cd
     foo();
     pop cd
-	}
+  }
 #+end_src
 
 - caller-saved не выгодны:
@@ -148,12 +148,12 @@ func 1:
 * tricks (35:35)
 - char/short берут полный регистр
 #+begin_src asm
-	movsx esi, si
+  movsx esi, si
   movsx edi, dil
 #+end_src
 - при нехватке регистров идет через стек
 #+begin_src asm
-	movsx rax, DWORD PTR 8[rsp] ;; rsp - return addr, rsp+8 - arg
+  movsx rax, DWORD PTR 8[rsp] ;; rsp - return addr, rsp+8 - arg
 #+end_src
 - если у .c и .s общий ABI
 #+begin_src bash
@@ -173,22 +173,22 @@ gcc one.c two.s
 * inline assembler (46:10)
 #+begin_src cpp
 unsigned popcnt(unsigned n){
-	unsigned mask = 1u << 31, cnt = 0;
-	do{
-		cnt+=((n&mask) == mask);
-	} while((mask = mask >> 1) != 0);
-	return cnt;
+  unsigned mask = 1u << 31, cnt = 0;
+  do{
+    cnt+=((n&mask) == mask);
+  } while((mask = mask >> 1) != 0);
+  return cnt;
 }
 #+end_src
 - Но в x86 есть инструкция popcnt
 #+begin_src cpp
 unsigned popcnt(unsigned n){
-	unsigned cnt;
-	asm("popcnt %0, %1":"=r"(cnt):"r"(n));
-	// r - register (read)
-	// = - destination (write)
+  unsigned cnt;
+  asm("popcnt %0, %1":"=r"(cnt):"r"(n));
+  // r - register (read)
+  // = - destination (write)
   // + - (write and read)
-	return cnt;
+  return cnt;
 }
 #+end_src
 - asm qualifiers (template : output : input : clobber);
@@ -205,7 +205,7 @@ asm("mov edi, %1\n\tcall fact\n\tmov %0, eax":"=r"(res):"r"(y):"eax");
 * Альтернативы ассемблеру
 #+begin_src cpp
 unsigned popcnt(unsigned n){
-	return __builtin_popcount(n);
+  return __builtin_popcount(n);
 }
 #+end_src
 - если инструкция есть - popcnt
@@ -213,12 +213,12 @@ unsigned popcnt(unsigned n){
 - Компилятор может сматчить разумную реализацию если узнает ее
 #+begin_src cpp
 unsigned popcnt(unsigned n){
-	unsigned cnt = 0;
-	while(n){
-		n&=n-1;
-		cnt++;
-	}
-	return cnt;
+  unsigned cnt = 0;
+  while(n){
+    n&=n-1;
+    cnt++;
+  }
+  return cnt;
 }
 // gcc -O2 -march=tigerlake
 // gcc -O2 -march=native

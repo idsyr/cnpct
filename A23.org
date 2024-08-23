@@ -125,12 +125,12 @@ fesetround(FE_TOWARDZERO);
 - Сейчас это давно не так, но 32 битный ассемблер остался с тех времен
 #+begin_src cpp
 double foo(double f1, double f2) {
-	double f3;     // fld1 - инструкция чтобы поместить 1.0 на верхушку стека fpu
-	f1 = 1.0 - f1; // fsub QWORD PTR [esp+4]   // st0 -=mem
-	f1 = f2 * f1;  // fmul QWORD PTR [esp+12]
-	f3 = f1 / 3.0; // fld st(0)                // st1 = st0, st0 = st0
-	f2 = f1 + f3;  // fdiv DWORD PTR .LC1
-	return f2;     // faddp st(1), st          // st1 += st0, pop st
+  double f3;     // fld1 - инструкция чтобы поместить 1.0 на верхушку стека fpu
+  f1 = 1.0 - f1; // fsub QWORD PTR [esp+4]   // st0 -=mem
+  f1 = f2 * f1;  // fmul QWORD PTR [esp+12]
+  f3 = f1 / 3.0; // fld st(0)                // st1 = st0, st0 = st0
+  f2 = f1 + f3;  // fdiv DWORD PTR .LC1
+  return f2;     // faddp st(1), st          // st1 += st0, pop st
 }                ///// st - fpu stack
 #+end_src
 - сопроцессор с отдельным стеком это историческая редкость
