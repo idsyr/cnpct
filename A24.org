@@ -1,0 +1,263 @@
+#+TITLE: Семинар 6.5. Кросс-ассемблеры, из сходства и различия  
+#+AUTHOR: idsyr
+#+STARTUP: showeverything 
+#+OPTIONS: toc:2
+
+
+
+
+* Кросс-компиляция (00:00)
+- riscv64-linux-gnu-gcc
+- arm-linux-gnueabi-gcc
+
+
+
+
+* Ассемблер ARM и факториал (5:50)
+- Регистры x0...x31 по 64 bit
+- Регистры w0...w31 по 32 bit - lpart xN
+| x0-x7   | Аргументы                  |
+| x8      | Передача блока памяти      |
+| x9-x15  | caller-saved               |
+| x16-x18 | temp                       |
+| x19-x28 | calle-saved                |
+| x29     | frame pointer              |
+| x30     | link registr               |
+| x31     | zero registr/stack pointer |
+- x31 в зависимости от инструкции
+- для удобства лучше пользоваться алиасами xzr и sp
+
+
+
+
+
+* Необычные режимы адресации (14:00)
+- Обращение по адресу
+#+begin_src asm
+	ldr x0, [x1] ;; x0 = *x1
+#+end_src
+- Адресация со смещением 
+#+begin_src asm
+	ldr x19, [sp, 16] ;; x19 = *(sp + 16)
+#+end_src
+- Преиндексная адресация
+#+begin_src asm
+	ldr x1, [x3, 16]! ;; x3 +=16; x1 =*x3
+#+end_src
+- Постиндексная адресация
+#+begin_src asm
+	ldr x5, [x7], 16 ;; x5 = *x7; x7 +=16
+#+end_src
+- Адресация со сдвигом
+#+begin_src asm
+	ldr x0, [x1. x2. lsl 16] ;; w0 = *(x1 + x2 << 16);
+#+end_src
+- Адресация с расширением
+#+begin_src asm
+	ldr w0, [x0, w1, sxtw 2] ;; w0 = *(x0 + sext(w1) << 2);
+#+end_src
+- Загрузка сразу двух регистров
+#+begin_src asm
+	ldp x29, x30, [sp], 32 ;; x29 = *(sp);
+	                       ;; x30 = *(sp + 8);
+	                       ;; sp +=32
+#+end_src
+- PC-relative адресация (загрузка констант с абсолютным адресом)
+#+begin_src asm
+	ldr x1, =num
+#+end_src
+
+
+
+
+* PC-relative адресация (19:15)
+#+begin_src cpp
+int gsym;
+int gret() { return gsym; }
+#+end_src
+- в x86 породит (чтобы влезть в кодировку) попытку дотянуться от rip:
+#+begin_src asm
+	mov eax, DWORD PTR gsym[rip] ;; pc-relative
+#+end_src
+- в x86 если не дотянуться решает линкер (переложит поближе). В arm есть способ:
+#+begin_src asm
+	adrp x0, gsym ;; загрузка адреса страницы (адрес символа с точностью до 4 кб (12bit))
+	ldr w0, [x0, #:lo12:gsym]
+#+end_src
+
+
+
+
+* Линк регистр (24:20)
+- Идея оптимизации последней функции
+#+begin_src cpp
+int ext(int x, int y);
+int call_ext(int x, int y){
+  return ext(y, x) + x;
+#+end_src
+#+begin_src asm
+call_ext:
+  stp x29, x30, [sp, -32]!
+  mov x29, sp
+  str x19, [sp, 16]
+  mov w19, w0
+  mov w0, w1
+  mov w1, w19
+  bl ext  ;; branch and link (save in link)
+  add w0, w0, w19
+  ldr x19, [sp, 16]
+  ldp x29, x30, [sp], 32
+  ret
+#+end_src
+
+
+
+
+* Ассемблер RISC-V и data-flow операции
+- 4 варианта базовой основы Base ISA -> RV32I RV32E RV64I RV128I
+- ширина регистров зависит от базовой isa
+- Data flow в целос тоже есть почти везде
+#+begin_src cpp
+int df(int x, int y) {return (x < y); }
+#+end_src
+#+begin_src asm
+  setl al ;;x86
+  cset w0m lt ;;arm
+  slt a0,a0,a1 ;;risc-v (not require cmp)
+#+end_src
+- Внутри arm и x86 есть select
+#+begin_src cpp
+int df(int x, int y) { return (x < y) ? x : y; }
+#+end_src
+#+begin_src asm
+  cmovle eax, esi ;;x86
+  csel w0, w1, w0, le ;;arm
+#+end_src
+- branches - control flow - передача управления
+
+
+
+
+* Жизнь без регистра флагов (36:34)
+- в risc-v нет регистра флагов
+
+
+
+
+
+* Problems (40:54)
+- Problem AGA
+- Problem AGR
+
+
+
+
+* Векторизация на SSE в x86  (42:40)
+- Регистры намного дешевле, чем память
+- Почему бы не сделать длинные регистры и не сводить всю программу к вычислениям над их частями?
+#+begin_src cpp
+enum { N = 256 };
+int a[N], b[N], c[N];
+void foo(){
+	int i;
+	for(i = 0; i<N; ++i)
+		a[i] = b[i] + c[i];
+}
+#+end_src
+#+begin_src asm
+foo:
+  xor eax, eax
+.L2:
+  movdqa xmm0, XMMWORD PTR b[rax]
+  paddd xmm0, XMMWORD PTR c[rax]
+  add rax, 16
+  movaps XMMWORD PTR a[rax-16], xmm0
+  cmp rax, 1024
+  jne .L2
+  ret 
+#+end_src
+- Компилятор не сделает этого для:
+#+begin_src cpp
+int find(const int *a, int n, int x){
+  int i;
+
+	for(i = 0; i<n; i++)
+		if(a[i] == x)
+			return i;
+	return -1;
+}
+#+end_src
+
+
+
+* Программирование на интринсиках (48:50)
+- ускорение более чем втрое:
+#+begin_src cpp
+int find_simd(const int *a, int n, int x){
+	int i, mainsz = (n / 4) * 4;
+	__mm128i v = _mm_set1_epi32(x); // broadcast, all 4 32 of v is x
+	for(i = 0l i<mainsz; i+=4){
+		__m128i u = _mm_cmp_epi32_mask(v, u, _MM_CMPINT_EQ);
+		if(m != 0)
+			return i + __buitin_ctz(mask);
+	}
+	for( i = mainsz; i<n; i+=1)
+		if(a[i] == x)
+			return i;
+	return -1;
+}
+#+end_src
+
+
+
+
+* ARM NEON, x86 AVX, снова о RISC-V и литература (56:40)
+- v0 это то же, что и q0, но его можно адресовать частями
+#+begin_src asm
+  ldr q0, [x0, x3]
+  ldr q1, [x0, x2]
+  add v0.4s, v0.4s, v1.4s
+  str q0, [x1, x0]
+  add x0, x0, 16
+  cmp x0, 1024
+  bne .L2
+#+end_src
+- в x86 расширения AVX добавили ymm и zmm регистры, размером 256 и 512 бит соответственно и инструкции для работы с ними 
+** Должны ли векторв алиасится с fp?
+- Для x86 и ARM NEON векторные регистры алиасятся с double precision
+- Для RISC-V векторные регистры вводятся отдельным расширением
+
+
+
+
+* Литература (1:03:55)
+
+
+
+
+* Раздельная трансляция и релокации (1:06:30)
+- Во что будет закодирован вызов fact если мы на этапе ассемблирования не знаем куда прыгать?
+| fact.c        | main.c         |
+| __COMPILER__  |                |
+| fact.s        | main.s         |
+| __ASSEMBLER__ |                |
+| fact.o        | main.o         |
+| fact: <smth>  | E8 00 00 00 00 |
+| __LINKER__    |                |
+| a.out         | E8 fact        |
+- objdump -r factmain.o
+- RELOCATION RECORDS
+- accемблер собирает секции (не только) релокации, которые затем ресолвит линкер
+
+
+
+
+* Наши собственные библиотеки (1:19:55) 
+- ar cr libfact.a fact.o
+- gcc factmain.c -L. -lfact
+
+
+
+
+
+
