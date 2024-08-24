@@ -32,8 +32,11 @@ gcc $FLAGS LCmain.o cache.o  -o LCsep.x
 - chmod "+x" x.sh
 - sh -vx x.sh
 - зависимости образуют ациклический граф
+
+
 ** Минусы?
 - он пересобирает все
+
 
 
 
@@ -62,6 +65,8 @@ make FLAGS="-g -O0"
 clean:
 	rm -rf *.x *.o *.log
 #+end_src
+
+
 ** Простейший makefile
 #+begin_src makefile
 FLAGS ?= -O2
@@ -88,12 +93,18 @@ testrun: LC.x
 #+end_src
 - @ заглушает вывод
 - $$ экранирует $ (только makefile, not shell)
+
+
 ** Проблема простого примера
 - Компилятор прибит гвоздями: для компиляторов, линкеров есть стандартные переменные:
 #+begin_src makefile
 LCmain.o: LCmain.c
 	$(CC) $(CFLAGS) -c LCmain -o LCmain.o
 #+end_src
+
+
+
+
 
 * Ленивые переменные (19:51)
 #+begin_src makefile
@@ -104,7 +115,10 @@ quux = $(baz)
 qux = Hello $(quux) #Hello Make
 quux = Make        
 #+end_src
+- make пытается детектировать рекурсию в таких вычислениях
 - .PHONY: target - специальные таргеты, которые не соответствуют никаким результирущим файлам
+
+
 ** Не надо бороться с ленивостью (24:40)
 - make -f makefile -j4 (4 thread)
 #+begin_src makefile
@@ -117,6 +131,8 @@ SUBDIRS = foo bar baz
 - И мы потеряли параллельность
 - Ошибки в рекурсивной сборке будут проигнорированы. Можно вставить логику их обноружения, но тогда она будет работать при вызове make -k когда мы как раз хотим проигнорировать все ошибки  
 - MAKEFILES += --no-prints-directory (можно передавать изнутри)
+
+
 ** Ленивые списки
 #+begin_src makefile
 SUBDIRS = sub1 sub2 sub3
@@ -137,7 +153,7 @@ $(SUBDIRS):
 - $(@D) - dir
 - $(@F) - file
 
-- make пытается детектировать рекурсию в таких вычислениях
+
 ** Энергичные присвоения
 - bar := Hello $(baz)
 - baz := World
@@ -170,6 +186,8 @@ LCmain.o: LCmain.c
 
 #...
 #+end_src
+
+
 ** Проблемы?
 - cc в действительности не редефайнит умолчание (у некоторых переменных есть default значение и на них не работает ?= )
 #+begin_src makefile
@@ -178,8 +196,8 @@ ifeq ($(origin CC), default)
 endif
 #+end_src
 - builtin функция origin интересна тем, что рассказывает откуда пришла переменная. Ее возможные значения: undefined, default, environment, file и прочие
-
 - Много абсолютно однотипных строчек
+
 
 ** Промежуточные итоги:
 - Используйте стандартные переменные для компиляторов, линкеров
@@ -208,6 +226,8 @@ objs = $(patsubst %.c, %.o, $(cfiles))
 #+begin_src makefile
 ofilt = $(filtered:%.c=%.o)
 #+end_src
+
+
 ** Patern rules
 - чтобы разобраться с однотипными рецептами, нужно написать общий
 #+begin_src makefile
@@ -229,12 +249,18 @@ COBJ = LCmain.o cache.o ...
 ...
 #+end_src
 - Правило для LCmain взято как implicit 
+
+
 ** Wildcard
 - Многие любят делать так:
 - CSRC = LCmain.c $(wildcard src/*.c)
 - Сами по себе ничем не плохи, но тут есть концептуальное возражение
 - система сборки считает своими таргетами весь мусор который она найдет в папке src
 - Списки файлов лучше прибивать намертво простым перечислением
+
+
+
+
 
 * Вторая версия makefile и зависимости от хедеров (47:40)
 #+begin_src makefile
@@ -277,6 +303,8 @@ gcc -I ./include -E src/cache.c -MM -MT cache.o
 #+end_src
 - После MT мы указываем make target и компилятор сам собирает для нас зависимости. Это становится бесконечно сложно для C++ modules
 - Разумеется лучше все это упаковывать в implicit rules
+
+
 ** Включение файлов
 - Директива include приостанавливает чтение текущего makefile и включает в него все что указано в списке include файлов
 #+begin_src makefile
@@ -288,6 +316,8 @@ DEPS = $(COBJ:.p=.d)
 include $(DEPS)
 #+end_src
 - думать об этом так: первое считавание makefile открывает все инклуды, после чего второе считывание собирает все нужные зависимости
+
+
 ** Убираем слишком общие правила
 - Хороший тон это использовать для переменных static pattern rules
 #+begin_src makefile
@@ -360,6 +390,8 @@ ifeq (0, $(words $(findstring $(MAKECMDGOALS), $(NODEPS))))
 include $(DEPS)
 endif
 #+end_src
+
+
 ** Промежуточные итоги
 - У некоторых переменных есть default values, проверяйте их правильно
 - Используйте pattern rules для уменьшения бойлерплейта
@@ -437,6 +469,8 @@ cmake -DCMAKE_C_COMPILER=clang
 
 * Бонус. Немного больше про cmake  (01:19:35)
 - Но cmake мало того, что императивен. Он еще и обьектно-ориентирован
+
+
 ** Индивидуальная работа с таргетами
 - В cmake нормально работать с целями индивилуально, а не ставить флаги компиляции сразу на все
 - Даже если вы работаете с каким то списком целей одинаково
@@ -449,18 +483,82 @@ foreach(APP ${APPS})
   target_link_libraries(${APP} frame)
   target_link_libraries(${APP} comblib)
 endforeach()
-- следует использовать target_ версии
 #+end_src
-- ??? here can be more (1:22:06 - 1:24:37)
+- следует использовать target_ версии
+- С точки зрения cmake библиотека это обьект, который является единицой зависимости, и как единица зависимости эта штука несомненно библиотека, поэтому cmake позволяет сделать:
+#+begin_src cmake
+cmake_minimum_requireed(VERSION 3.15)
+project(computability)
+enable_testing()
+
+add_library(frame INTERFACE) 
+#[[ это интерфейсная библиотека, здесь нечего линковать ]]
+target_include_directories(frame INTERFACE framework)
+#[[ любой кто будет с ней линковаться подключит эту директорию, она на него спропагируется, когда вы зависите от библиотеки на вас спропагируется директория ]] 
+#+end_src
+- Если библиотека состоит только из хедеров, в ней нечего линковать и ее можно использовать как интерфейсную библиотеку
+- Тогда линковка с ней будет подхватывать ее публичные пути для включения
+- Это общий механизм. Любая линковка пропагирует интерфейсные зависимости
+
+ 
 ** Cостав таргета
 - target_link_libraries - любая в том числе транзитивная зависимость по сборке
 - target_compile_feature - некоторые опции, такие как стандарт, не зависящие от синтаксиса опций конкретного компилятора
 - target_compile_definitions - дефайны (в том числе экспортируемые)
 - target_include_directories, target_link_directories - пути (в том числе экспортируемые) для компиляции и линковки. Старайтесь их не указывать явно, а получать из интерфейса библиотек
 - target_compile_options, target_link_options - прямое указание опций. Старайтесь использовать features где возможно
+
+
 ** Выражения генератора
+- Вы можете в момент конфигурации знать что вы конфигурируете и, например, передавать в таргет дефайны, зависящие от этого
+#+begin_src cmake
+target_compile_definitions(MyTarget PRIVATE
+  $<$<CONFIG:Debug>:DEBUG_ONLY=1>
+  $<$<CONFIG:Release>:RELEASE_ONLY=1>
+  FOO=3 #[[ при любой ]]
+)
+#+end_src
+- Это выглядит пугающе, но на самом деле довольно просто
+#+begin_src makefile
+target_compile_options(myapp
+  PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+)
+#+end_src
+
+
 ** Иерархия поддиректорий
+- Считается хорощим тоном иметь в проекте cmake, делегирущий к вложенным директориям (add_subdir)
+#+begin_src cmake
+add_library(frame INTERFACE)
+target_include_directories(frame INTERFACE framework)
+
+add_library(comblib INTERFACE)
+target_include_directories(comblib INTERFACE combinatorial)
+
+add_subdirectory(apps)
+add_subdirectory(tests)
+#+end_src
+- так мы избегаем убер-сборки всего в одном месте и разделяем сборку по "функциям" 
+- в cmake в отличии например от make можно писать функции:
+#+begin_src cmake
+function()
+...
+endfunction()
+#+end_src
+
+
 ** Работа со scope
+- Любая переменная доступна через add_subdir вниз
+- Можно установить переменную в parent_scope, но этого лучше избегать
+#+begin_src cmake
+# apps запомнили папку до приложения
+set(${APP}_app ${CMAKE_BINARY_DIR}/apps/${APP} PARENT_SCOPE)
+# tests использовали ее
+set(APP ${${APP}_app})
+#+end_src
+- Это оправдано в случае когда мы выносим разнородные тесты в общую папку
+- Всегда задавайтесь вопросом не ошибка ли это в проектировании
+
 
 * Окончательные уроки (01:30:40)
 - Система сборки это код
@@ -468,6 +566,8 @@ endforeach()
 - Тем более не лезьте в стандартные переменные. Оверрайд CMAKE_C_FLAGS не заканчивается ничем хорошим
 - Все переменные итеративны и не равны переменным shell. Списки разделены через ; или переносом строки
 - Большая часть того, что вы хотите сделать уже поддержана из коробки. Хороший cmake максимально это переиспользует
+
+
 ** Больше про cmake:
 - Daniel Pfeifer - Effective CMake,C++Now'2017
 - Mathieu Ropert - Using Modern CMake Patterns to Enforce a Good Modular Design, CppCon'2017
