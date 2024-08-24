@@ -1,0 +1,489 @@
+#+TITLE: Допсеминар: системы сборки (make, cmake)  
+#+AUTHOR: idsyr
+#+STARTUP: showeverything 
+#+OPTIONS: toc:2
+
+
+
+
+* Зависимости и хедера (00:00)
+- Нам удобно думать об отдельных сущностях
+- в частности это служит для экономии мышления
+- первые зависимости на этапе компиляции: declaration
+- вторые зависимости на этапе линковки: definition
+- цикличкские зависимости между хедерами стращнее чем между модулями, следует минимизировать включения в хедер
+- детектировать лишние хедера: iwyu ./cource/hash.c -I./include
+
+
+* Build.sh (08:22)
+#+begin_src shell
+#!/bin/bash
+if[ -z ${FLAGS+x} ]
+then 
+		echo "FLAGS unset, default to -O2"
+		FLAGS="-O2"
+fi
+
+gcc $FLAGS -c -I./include LCmain.c -o LCmain.o
+gcc $FLAGS -c -I./include ./source/cache.c -o cache.o
+#...
+gcc $FLAGS LCmain.o cache.o  -o LCsep.x
+#+end_src
+- chmod "+x" x.sh
+- sh -vx x.sh
+- зависимости образуют ациклический граф
+** Минусы?
+- он пересобирает все
+
+
+
+
+* Makefiles и декларативная модель (11:48)
+- Вы описываете зависимости, а не процесс
+#+begin_src makefile
+FLAGS ?= -O2
+
+LCmain.o: LCmain.c
+	gcc $(FLAGS) -c LCmain.c -o LCmain.o
+#+end_src
+- Переменная FLAGS может быть установлена извне или изнутри
+#+begin_src shell
+make FLAGS="-g -O0"
+#+end_src
+- Операция ?= означает "установить если не определена по правилам shell"
+- Любое правило (рецепт) в make  записывается единообразно
+#+begin_src makefile
+<target>: [<requisite>]
+	[shell]
+#+end_src
+- Таргет обычно означает файл и make следит за датой обновления файла
+- Рецепт пересобирается только если изменился хотя бы один реквизит либо если его вообще нет
+#+begin_src makefile
+clean:
+	rm -rf *.x *.o *.log
+#+end_src
+** Простейший makefile
+#+begin_src makefile
+FLAGS ?= -O2
+TESTS = ./Tests
+all: LCmain.o cache.o
+	gcc $(FLAGS) -I./include LCmain.c cache.o -o LC.x
+LCmain.o: LCmain.c
+	gcc $(FLAGS) -I./include -c LCmain.c
+cache.o: ./src/cache.c
+	gcc ...
+clean:
+	rm -rf *.x *.o *.log
+testrun: LC.x
+	@for i in $(TESTS)/*.dat; do \
+		echo "$$(basename $${i})"; \
+		./LC.x < $${i}; \
+		echo ""; \
+	done > all.log
+	@if diff -w all.log $(TESTS)/corr.log; them \
+		echo "Tests pass"; \
+	else \
+		echo "Tests failed"; \
+	fi
+#+end_src
+- @ заглушает вывод
+- $$ экранирует $ (только makefile, not shell)
+** Проблема простого примера
+- Компилятор прибит гвоздями: для компиляторов, линкеров есть стандартные переменные:
+#+begin_src makefile
+LCmain.o: LCmain.c
+	$(CC) $(CFLAGS) -c LCmain -o LCmain.o
+#+end_src
+
+* Ленивые переменные (19:51)
+#+begin_src makefile
+#                   @echo $() after block
+bar = Hello $(baz)  #Hello World
+baz = World        
+quux = $(baz)
+qux = Hello $(quux) #Hello Make
+quux = Make        
+#+end_src
+- .PHONY: target - специальные таргеты, которые не соответствуют никаким результирущим файлам
+** Не надо бороться с ленивостью (24:40)
+- make -f makefile -j4 (4 thread)
+#+begin_src makefile
+SUBDIRS = foo bar baz
+.PHONY: subdirs
+	for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir; \
+	done
+#+end_src
+- И мы потеряли параллельность
+- Ошибки в рекурсивной сборке будут проигнорированы. Можно вставить логику их обноружения, но тогда она будет работать при вызове make -k когда мы как раз хотим проигнорировать все ошибки  
+- MAKEFILES += --no-prints-directory (можно передавать изнутри)
+** Ленивые списки
+#+begin_src makefile
+SUBDIRS = sub1 sub2 sub3
+.PHONY: subdirs
+subdirs: $(SUBDIRS)
+.PHONY: $(SUBDIRS)
+$(SUBDIRS):
+	@$(MAKE) -C $@
+#+end_src
+
+
+
+
+* Автоматические переменные (30:52)
+- $@ - active target
+- $^ - all requisites
+- $< - first requisite
+- $(@D) - dir
+- $(@F) - file
+
+- make пытается детектировать рекурсию в таких вычислениях
+** Энергичные присвоения
+- bar := Hello $(baz)
+- baz := World
+- echo -> просто Hello
+- != исполняет shell команду справа
+- Приходящие из environment переменные - константы
+- для их изменения следует использовать override
+
+
+
+
+
+* Первая версия makefile (36:15)
+#+begin_src makefile
+CC ?= gcc
+CFLAGS ?= -O2
+COMMONINC = -I./include
+TESTS = ./Tests
+
+override CFLAGS += $(COMMONINC)
+
+.PHONY: all
+all: LC.x
+
+LC.x: LCmain.o cache.p hash.o list.o
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+LCmain.o: LCmain.c
+	$(CC) $(CFLAGS) -c $^ -o $@
+
+#...
+#+end_src
+** Проблемы?
+- cc в действительности не редефайнит умолчание (у некоторых переменных есть default значение и на них не работает ?= )
+#+begin_src makefile
+ifeq ($(origin CC), default)
+	CC = gcc
+endif
+#+end_src
+- builtin функция origin интересна тем, что рассказывает откуда пришла переменная. Ее возможные значения: undefined, default, environment, file и прочие
+
+- Много абсолютно однотипных строчек
+
+** Промежуточные итоги:
+- Используйте стандартные переменные для компиляторов, линкеров
+- Используйте также стандартные переменные для флагов
+- Помечайте PHONY те таргеты, которые не соответствуют файлам
+- Старайтесь не бороться с ленивостью, а используйте ее
+- Используйте override если вы предполагаете что переменная задается извне
+- Не пишите сложные shell скрипты внутри makefiles
+- Используйте автоматические переменные
+
+
+
+
+* Функции и wildcards (41:33)
+- Функция вызывается как $(function [<args>])
+#+begin_src makefile
+cfiles = main1.c foo.c main2.c bar.c
+mainc = main1.c main2.c
+filtered = $(filter-out $(mains), $(cfiles))
+#+end_src
+- Изо всех функций главной для нас является patsubst. Как аргументы она берет pattern, replacement, text
+#+begin_src makefile
+objs = $(patsubst %.c, %.o, $(cfiles))
+#+end_src
+- у нее есть второй вариант $(var:pattern=replacement)
+#+begin_src makefile
+ofilt = $(filtered:%.c=%.o)
+#+end_src
+** Patern rules
+- чтобы разобраться с однотипными рецептами, нужно написать общий
+#+begin_src makefile
+CSRS = LCmain.c source/cache.c source/hash.c source/list.c
+COBJ = $(CSRS:%.c=%.o)
+#pattern rule -> (if this not written -> implicit)
+%.o:%.c
+	$(CC) $(CFLAGS) -c $^ -o $@
+LC.x: $(COBJ)
+	$(CC) $^ -o $@ $(LDFLAGS)
+#+end_src
+- На самом деле такой рецепт не надо даже писать т.к. он уже есть
+- Но в данном случае будут проблемы: обьектные файлы начнут возникать внутри папок
+- Логичное (пример развития мысли при решении проблемы, но не обязательно конечное и наиболее развитое) решение 
+#+begin_src makefile
+...
+COBJ = LCmain.o cache.o ... 
+%.o: source/%.c
+...
+#+end_src
+- Правило для LCmain взято как implicit 
+** Wildcard
+- Многие любят делать так:
+- CSRC = LCmain.c $(wildcard src/*.c)
+- Сами по себе ничем не плохи, но тут есть концептуальное возражение
+- система сборки считает своими таргетами весь мусор который она найдет в папке src
+- Списки файлов лучше прибивать намертво простым перечислением
+
+* Вторая версия makefile и зависимости от хедеров (47:40)
+#+begin_src makefile
+ifeq ($(origin CC), default)
+	CC = gcc
+endif
+
+CFLAGS ?= -O2
+COMMONINC = I./include
+TESTS = ./Tests
+SRC = ./source
+
+override CFLAGS += $(COMMONINC)
+CSRS = LCmain.c source/cache.c source/hash.c source/list.c
+COBJ = LCmain.o cachce.o hash.o list.o
+%.o: source/%.c
+	$(CC) $(CFLAGS) -c $^ -o $@
+.PHONY: all
+all: LC.x
+
+LC.x: $(COBJ)
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+.PHONY: testrun
+testrun: LC.x
+	@./runtests.sh $(TESTS)
+
+.PHONY: clean
+clean:
+	rm -rf *.x
+	rm -rf *.o
+	rm -rf *.log
+
+#+end_src
+- Зависимости от хедеров?
+- В этой версии make не перестраивает проект если изменился хедер
+- На пути к этому исправлению потребуются новые опции компилятора
+#+begin_src bash
+gcc -I ./include -E src/cache.c -MM -MT cache.o
+#+end_src
+- После MT мы указываем make target и компилятор сам собирает для нас зависимости. Это становится бесконечно сложно для C++ modules
+- Разумеется лучше все это упаковывать в implicit rules
+** Включение файлов
+- Директива include приостанавливает чтение текущего makefile и включает в него все что указано в списке include файлов
+#+begin_src makefile
+DEPS = $(COBJ:.p=.d)
+%.o: src/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+%.d: src/%.c
+	$(CC) -E $(CFLAGS) $< -MM -MT $(@:.d=.o) > $@
+include $(DEPS)
+#+end_src
+- думать об этом так: первое считавание makefile открывает все инклуды, после чего второе считывание собирает все нужные зависимости
+** Убираем слишком общие правила
+- Хороший тон это использовать для переменных static pattern rules
+#+begin_src makefile
+objects = foo.o bar.o
+all: $(objects)
+$(objects): %.o: %.c
+	$(CC) -c $(CFLAGS) $< -o $@
+#+end_src
+- Чтобы инклуды не пересобирались на make clean можно отфильтровать имена такого рода таргетов при включении
+#+begin_src makefile
+NODEPS = clean
+ifeq (0, $(words $(findstring $(MAKECMDGOALS), $(NODEPS))))
+include $(DEPS)
+endif
+#+end_src
+
+
+
+
+* Третья итерация: почти идеальный makefile (56:36)
+#+begin_src makefile
+ifeq($(origin CC), default)
+	CC = gcc
+endif
+
+CFLAGS ?= -O2
+OUT_O_DIR ?= build
+COMMONIC = -I./include
+TESTS = ./Tests
+SRC = ./src
+ROOT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
+override CFLAGS += $(COMMONINC)
+
+CSRC = LCmain.c src/cache.c src/hash.c src/list.c
+
+COBJ := $(addprefix $(OUT_O_DIR)/,$(CSRC:.c=.o))
+DEPS = $(COBJ:.o=.d)
+
+.PHONY: all
+all: $(OUT_O_DIR)/LC.x
+
+$(OUT_O_DIR)/LC.x: $(COBJ)
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+$(COBJ): $(OUT_O_DIR)/%.o: %.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(DEPS): $(OUT_O_DIR)/%.d: %.c
+	@mkdir -p $(@D)
+	$(CC) -E $(CFLAGS) $< -MM -MT $(@:.d=.o) > $@
+
+TESTFILES=$(wildcard $(TESTS)/*dat)
+
+.PHONY: testrun
+testrun: $(TESTFILES)
+
+.PHONY: $(TESTFILES)
+$(TESTFILES): $(OUT_O_DIR)/LC.x
+	@$(ROOT_DIR)/runtest.sh $@ $(OUT_O_DIR)/LC.x
+
+.PHONY: clean
+clean:
+	rm -rf $(COBJ) $(DEPS) $(OUT_O_DIR)/*.x $(OUT_O_DIR)/*.log
+
+NODEPS = clean
+
+ifeq (0, $(words $(findstring $(MAKECMDGOALS), $(NODEPS))))
+include $(DEPS)
+endif
+#+end_src
+** Промежуточные итоги
+- У некоторых переменных есть default values, проверяйте их правильно
+- Используйте pattern rules для уменьшения бойлерплейта
+- выучить список implicit rules
+- использовать static pattern rules чтобы не конфликтовать с неявными правилами
+- Не злоупотребляйте использованием wildcards, используйте их там, где не может быть зависимостей по сборке, например для тестов
+- Не забывайте про зависимости от хедеров
+
+
+
+
+* Знакомство с cmake (01:06:26)
+** Предназначение cmake
+- cmake это собственно не системы сборки
+- Это генератор файлов для систем сборки, например для make, но не только
+#+begin_src shell
+cmake -G "Unix Makefiles"
+cmake -G "Ninja"
+cmake -G "Visual Studio 17 2022"
+#+end_src
+- Из одного и того же описания cmake получаете файлы сборки для многих разных бэкендов
+#+begin_src cmake
+cmake_minimum_required(VERSION 3.11)
+project("problem_lc")
+
+SET(SRCS src/list.c 
+         src/cache.c 
+         src/hash.c)
+
+SET(TESTS ${CMAKE_SOURCE_DIR}/Tests)
+
+add_library(lclib STATIC ${SRCS})
+target_include_directories(lclib PUBLIC "include")
+
+add_executable(LC.x LCmain.c)
+target_link_libraries(LC.x lclib)
+#+end_src
+#+begin_src shell
+cmake -DCMAKE_BUILD_TYPE=Release -S . -B build
+#+end_src
+- -S . - из этой папки CMakeLists
+- -B build - сделать папку куда соберешь
+- Затем и после изменений: 
+#+begin_src shell
+cmake --build build
+#+end_src
+** Добавляем тесты
+#+begin_src cmake
+file(GLOB testfiles "Tests/*.dat")
+foreach(file ${testfiles})
+  add_test(NAME ${file}
+    COMMAND bash -c "${CMAKE_SOURCE_DIR}/runtest.sh ${file} ./LC.x"
+    WORKING_DIRECTORY ${CMAKE_СURRENT_BINARY_DIR})
+  set_tests_properties(${file} PROPERTIES DEPENDS LC.x)
+endforeach()
+#+end_src
+- императивными командами строится декларативная сборка
+** Отвязанность от shell
+- Переменные не являются shell переменными как в make. Чтобы получить shell настройку вам надо лезть в env, но обычно это не нужно
+- Для вывода сообщений используется message, а не shell.
+#+begin_src cmake
+message(STATUS "MYVAR = ${MYVAR}")
+#+end_src
+- Вместо установки и использования $(CC) есть переменная для конфигурации
+#+begin_src shell
+cmake -DCMAKE_C_COMPILER=clang
+#+end_src
+- Если она не подана, то переменная берет свое значение из ${CC}. Аналогично работает переменнаяа CMAKE_C_FLAGS
+** Обсуждение
+- Как ни парадаксально, но cmake куда императивнее и значит куда проще make
+- Дело в том, что в нем вы не совсем добавляете зависимости, а добавляете код для добавления зависимостей, а он вполне императивен
+
+
+
+
+* Бонус. Немного больше про cmake  (01:19:35)
+- Но cmake мало того, что императивен. Он еще и обьектно-ориентирован
+** Индивидуальная работа с таргетами
+- В cmake нормально работать с целями индивилуально, а не ставить флаги компиляции сразу на все
+- Даже если вы работаете с каким то списком целей одинаково
+#+begin_src cmake
+set(APPS allbraces;allperms)
+foreach(APP ${APPS})
+  add_executable(${APP} ${APP}.cc)
+  target_compile_features(${APP} PRIVATE cxx_std_20) 
+  #[[ Цель использует фичу, но те кто слинковался не обязан ее использовать (например с-interface) ]]]
+  target_link_libraries(${APP} frame)
+  target_link_libraries(${APP} comblib)
+endforeach()
+- следует использовать target_ версии
+#+end_src
+- ??? here can be more (1:22:06 - 1:24:37)
+** Cостав таргета
+- target_link_libraries - любая в том числе транзитивная зависимость по сборке
+- target_compile_feature - некоторые опции, такие как стандарт, не зависящие от синтаксиса опций конкретного компилятора
+- target_compile_definitions - дефайны (в том числе экспортируемые)
+- target_include_directories, target_link_directories - пути (в том числе экспортируемые) для компиляции и линковки. Старайтесь их не указывать явно, а получать из интерфейса библиотек
+- target_compile_options, target_link_options - прямое указание опций. Старайтесь использовать features где возможно
+** Выражения генератора
+** Иерархия поддиректорий
+** Работа со scope
+
+* Окончательные уроки (01:30:40)
+- Система сборки это код
+- Старайтесь не трогать глобальное состояние. Работайте индивидуально с таргетами. Используйте target_link_libraries для зависимостей
+- Тем более не лезьте в стандартные переменные. Оверрайд CMAKE_C_FLAGS не заканчивается ничем хорошим
+- Все переменные итеративны и не равны переменным shell. Списки разделены через ; или переносом строки
+- Большая часть того, что вы хотите сделать уже поддержана из коробки. Хороший cmake максимально это переиспользует
+** Больше про cmake:
+- Daniel Pfeifer - Effective CMake,C++Now'2017
+- Mathieu Ropert - Using Modern CMake Patterns to Enforce a Good Modular Design, CppCon'2017
+- Craig Scott - Deep CMake for Library Authors, CppCon'2019
+- CB Bailey - Things I Learnt While Trying to Aviod Becoming a CMake Expert, ACCU'2022
+- Hans Vredeveld - CMake: A Case Study, ACCU'2023
+
+
+
+
+
+
+
+
+
+
+
+
+
