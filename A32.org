@@ -1,0 +1,223 @@
+#+TITLE: Дополнение: SDL и визуализация  
+#+AUTHOR: idsyr
+#+STARTUP: showeverything 
+#+OPTIONS: toc:4
+
+
+
+* Обзор графических библиотек (00:00)
+- X11 протокол по которому оконное приложение может функционировать как на локальной так и на удаленной машине
+
+
+
+
+
+* Небольшой трюк с макросами и механизм atexit (06:35)
+** Начинаем работу
+- Первое, что нужно сделать это инициализировать библиотеку
+  #+begin_src cpp
+  res = SDL_Init(SDL_INIT_VIDEO);
+  // SDL_GetError() -> %s
+  #+end_src
+- для обработки ошибок может помочь макрос:
+  #+begin_src cpp
+  #define ERR(S) do {       \
+    const char *Func = #S; \
+    fprintf(stderr, "%s error: %s\n", Func, SDL_GetError()); \
+    abort(); \
+  } while(0)
+  #+end_src
+- Минусы: Для некоторых ошибок abort() не требуется
+#+begin_src cpp
+#define ERR_2(MSG, SEVTY)
+  do {
+    fprintf(stderr, "[%s:%d] error $s\b", __FILE__, __LINE__, MSG);
+    if(SEVTY) {fprintf(stderr, "Aborting...\n"); abort();}
+    } while (0)
+#define GET_3RD_ARG(A1, A2, A3, ...) A3
+#define ERR_MACRO_CHOOSER(...) GET_3RD_ARG(__VA_ARGS__, ERR_2, ERR_1)
+#define ERR(...) do {ERR_MACRO_CHOOSER(__VA_ARGS__)(VA_ARGS);} while(0)
+#+end_src
+** Регистрируем SDL_Quit
+- Вызов SDL_Quit в конце очень важен, но хотим ли мы постоянно следить не забыли ли мы ее вызвать перед выходом?
+- Чтобы не забыть что то сделать перед выходом из программы есть механизм atexit:
+#+begin_src 
+  int atexit(void (*func)(void));
+#+end_src
+- Он регистрирует указатель на функцию. Возвращает ноль если рег удалась
+- Можно зарегистрировать до 32 функций
+
+
+
+
+* Окно и рендерер (15:48)
+- Окно создается через функцию; далее к этому окну можно привезать рендерер
+#+begin_src cpp
+screen = SDL_CreateWindow();
+ren = SDL_CreateRenderer(screen,);
+#+end_src
+- Рендер рисует в окно. Сам по себе он привязан к одному из девайсов
+- Большая часть дальнейших вещей делается редерером
+* Получить информацию о девайсах
+#+begin_src cpp
+int ndrivers = SDL_GetNumRenderDrivers();
+if(ndrivers < 0)
+  ERR(SDL_GetNumRenderDrivers);
+for(int i = 0; i < ndrivers; ++i){
+  int res; SDL_RendererInfo nfo;
+
+  res = SDL_GetRenderDriverInfo(i, &nfo);
+  if(res < 0) ERR(SDL_GetRenderInfo);
+  else printinfo(i, &nfo);
+}
+#+end_src
+
+
+
+
+* Двойныая буферизация и простая геометрия (26:10)
+| Рендерер-> | Буффер-> | Окно |
+- SDL_RenderPresent - Отображает старый буфер на окно, заменяет буфер на новый для рендеринга
+#+begin_src cpp
+for(;;){
+  int pending;
+  SDL_Event event;
+  pending = SDL_PollEvent(&event);
+  if(pending && event.type == SDL_QUIT)
+    break;
+  renderTriangle(v.ren);
+  SDL_RenderPresent(v.ren);
+}
+#+end_src
+- Простая геометрия интерполируется и растуризуется
+#+begin_src cpp
+SDL_Vertex vertices[] = {vertex_1, vertex_2, vertex_3};
+SDL_RenderGeometry(ren, NULL, vertices, 3, NULL, 0);
+#+end_src
+
+
+
+
+* Текстуры и анимация (31:30)
+** Работа с текстурами
+- Текстура может быть довольно легко загружена из файла
+#+begin_src cpp
+tex = IMG_LoadTexture(ren, "file.png");
+#+end_src
+- Заметим, мы должны использовать рендерер чтобы создать текстуру
+- Далее рендерер просто копирует кусок текстуры в нужный квадрат
+#+begin_src
+SDL_Rect dst = { 100, 100, 256, 256 };
+SDL_RenderCopy(ren, tex, NULL, &dst); 
+#+end_src
+- Интересно, что текстуры можно форматировать программно, нацеливая на них рендерер и рендеря туда как в окно
+** Контроль частоты кадров
+#+begin_src cpp
+for(;;) {
+  SDL_Event event;
+  uint32 start, elapsed, estimated = 1000 / 50;
+  start = SDL_GetTicks();
+  ...
+  SDL_RenderPresent(v.ren);
+  elapsed = SDL_GetTicks() - start;
+  if(elapsed < estimated) SDL_Delay(estimated - elapsed);}
+#+end_src
+** Переход между координатами
+- Wl = 2(W'/W) - 1
+- Hl = -2(H'/H) + 1
+
+
+
+
+* Работа с клавиатурой и прочие события (47:55)
+#+begin_src cpp
+while (SDL_PollEvent(&event)) {
+  if (event.type == SDL_QUIT) goto cleanup();
+  if (event.type == SDL_KEYDOWN) {
+    SDL_Keycode kc = event.key.keysym.sym;
+    if (kc == SDLK_UP && ypos <= ground_level + 0.1)
+      speed = start_speed;}}
+#+end_src
+
+
+
+
+* Задача (53:41)
+- LRU_cache visualizator
+
+
+
+
+* Текст и его замены (56:05)
+- Глиф - графическое представление щрифта
+- Кегель - высота в пикселях 
+- Monospace - ширина букв одна
+- Шрифт - true type format - Описание математической функции, Сплайн интерполяция
+- Любой сивол в щрифте это описание сложной математической кривой, которую в картинку еще нужно отрендерить
+** Сложность с текстом
+- Загрузть шрифт:
+#+begin_src cpp
+TTF_Font* font = TTF_OpenFont("arial.ttf", size);
+#+end_src
+- Отрендерить в текстуру:
+#+begin_src cpp
+surface = TTF_RenderText_Solid(font, "Hello, world?", *color);
+texture = SDL_CreateTextureFromSurface(renderer, surface);
+#+end_src
+- И далее эту текстуру уже отобразить на экран
+- Для статического текста это ок, но для динамического текста(in loop) это так себе
+- решение: bitmap fonts, второй поток с рендерингом шрифтов
+
+
+
+
+
+* Абстрагированние рисовалки (01:08:20)
+- Повышение уровня абстракции
+- Проектирование архитектуры
+** К абстрагированию рисовалки
+- Предположим, что мы не хотим закладываться даже на детали SDL
+#+begin_src cpp
+struct Surface;
+void Surface_fillwith(args_t args);
+void Surface_putpixel(args_t args);
+
+struct ViewPort;
+typedef void (*callback_t)(struct Surface *, void *);
+enum pollres ViewPort_poll(struct ViewPort *v);
+struct ViewPort *ViewPort_query(args_t args, callback_t callback, void *data);
+#+end_src
+- -flto - link time optimization
+- -ffast-math
+** Верхний уровень архитектуры
+*** Viewport
+- Абстрагирует polling
+- Содержит и зовет callbacks
+- Формирует surface для callbacks
+*** Surface
+- Абстрагирует рендеринг 
+- Предоставляет контекст для рисования 
+
+
+
+
+* Учет практических соображений (01:21:15)
+- clojure замыкание
+** Пауза и скриншоты 
+#+begin_src cpp
+SDL_SetRenderTarget(ren, texture); // перенаправить рендерер в текстуру
+callback(ren, data); // отрисовка в текстуру
+SDL_QueryTexture(v->texture, NULL, NULL, &width, &height); // запрос длины и ширины
+SDL_Surface *surface = SDL_CreateRGBSurface(0, width, height, 32, 0, 0, 0, 0); // нетипизированный буффер
+SDL_RenderReadPixels(ren, NULL, surface->format->format, surface->pixels, surface->pitch); // Считать туда пиксели
+SDL_SaveBMP(surface, name); // Сохранить в картинку
+SDL_FreeSurface(surface);  
+SDL_SetRenderTarget(ren, NULL); // вернуть на экран
+#+end_src
+
+
+
+
+
+
+
