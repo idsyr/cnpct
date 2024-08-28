@@ -1,0 +1,369 @@
+#+TITLE: (Доп семинар) SIMD и ручная векторизация  
+#+AUTHOR: idsyr
+#+STARTUP: showeverything 
+#+OPTIONS: toc:2
+
+
+
+
+* Векторные возможности CPU
+- SIMD - single instruction, multiple data
+- Рсширения регистров: MMX, SSE, AVX: rax, xmm0, ymm0, zmm0
+** Спросить у компилятора доступность
+- Можно воспользоваться /proc/cpuinfo
+- Можно явно спросить
+#+begin_src cpp
+int have_sse = __builtin_cpu_supports("sse")? 1 : 0;
+int have_avx512 = __builtin_cpu_supports("avx512f")? 1 : 0;
+// f - foundational
+#+end_src 
+- Ответ будет дан на этапе исполнения через инструкцию cupid
+- Чтобы подключить на этапе компиляции нужно либо сообщить прагмой:
+#+begin_src cpp
+#pragma GCC target("avx512f")
+#+end_src
+- Либо указать опцию компилятора
+#+begin_src shell
+gcc -march=tigerlake test.c
+# -march=native определит локальный и подключит
+#+end_src
+
+
+
+
+* Хедера для интринсиков и методы работы с ними (07:50)
+- Исторически интринсики подключались из разных файлов
+#+begin_src cpp
+#include <mmintrin.h>  // MMX
+#include <xmmintrin.h> // SSE
+#include <emmintrin.h> // SSE2
+#include <pmmintrin.h> // SSE3
+#include <smmintrin.h> // SSE4.1
+#include <nmmintrin.h> // SSE4.2
+#include <ammintrin.h> // SSE4A
+#include <wmmintrin.h> // AES
+#include <immintrin.h> // AVX, AVX2, AVX-512F, FMA и этого хватает на всех
+#+end_src
+** Типы данных и функции 
+- Можно воспользоваться втроенными типами и функциями из immintrin
+#+begin_src cpp
+__m512i val = _mm512_set1_epi32(20);
+#+end_src
+- Это не выглядит слишком человечно. С другой стороны можно воспользоваться векторными расширениями GCC
+#+begin_src cpp
+typedef int __attribute((vector_size(64)))) v16si;
+v16si gcc_val = 20 - (v16si){}; 
+#+end_src
+- Использование этого приводит к привязке к компилятору (+intel intrinsic)
+- Тут есть свои особенности (broadcast через вычитание) и подводные камни. 
+- Для этого возможно лучше сделать свой прозрачный хедер с функциями и типами
+#+begin_src cpp
+ri512 val = set_zvalue(20); // x - 128, y - 256, z - 512
+#+end_src
+
+
+
+
+
+* Распечатка, сохранение и загрузка регистров (14:53)
+- Чтобы распечатать регистр, разумно временно сбросить его в память
+#+begin_src cpp
+void print_zreg(FILE *f, const char *const pname, ri512 r){
+	int vals[16] __attribute__((aligned(64))); // у адреса первые 4 бита нулевые
+	_mm512_store_epi32(vals, r); // ведь здесь мы ожидаем что данные выровнены
+	print_iarray(f, pname, vals, 16);
+}
+#+end_src
+- Далее мы используем обычную распечатку массива
+#+begin_src cpp
+for(i = 0; i<n; ++i) fprintf(f, "%6d", pvals[i]);
+#+end_src
+- С тем же успехом можно было бы использовать unaligned store (медленней)
+#+begin_src 
+int vals[16];
+_mm512_storeu_si512(vals, r);
+#+end_src
+** Определимся с врехом и низом
+- Мы знаем, что по документации set_zvlues ставит значения в нулевой, первый элементы слева направо (Начиная с верхних индексов)
+#+begin_src cpp
+set_zvalus(15, 14, ..., 0);
+#+end_src
+| z[15] | z[14] | ... | z[0] |
+|    15 |    14 | ... |    0 |
+- Одновременно с этим DUMP_ZREG печатает массив от нулевых к верхним индексам. На экране 0, 1, 2, 3, ..., 15
+
+
+
+
+* Простая арифметика (24:42)
+- Арифметика очень проста и обычно идет один к одному
+#+begin_src cpp
+_mm512_add_epi32(x, y);
+_mm512_max_epi32(x, y);
+#+end_src
+- Сравнения тоже поэлементные, но пораждает маску
+#+begin_src cpp
+int equal_zvalue(ri512 src1, ri512 src2) { 
+	m16 mask = _mm512_cmp_epi32_mask(src1, src2, _MM_CMPINT_NE);
+	return (mask == 0);
+}
+#+end_src
+** Определяем позицию совпавшего
+#+begin_src cpp
+int first_equal_zvalue(ri512 src1, ri512 src2) {
+	m16 mask = _mm512_cmp_epi32_mask(src1, src2, _MM_CMPINT_EQ);
+	if(mask1 != 0) return __builtin_ctz(mask);
+	return -1;
+}
+#+end_src
+- Использование ctz в качестве билтина теперь кажется не такой уж и плохой идеей 
+
+
+* Первый пример: find (29:00)
+#+begin_src cpp
+int find_simd(const int *a, int n, int x){
+	int i;
+	ri512 needle = set_zvalue(x);
+	int mainsz = (n / 16) * 16;
+
+	for(i = 0; i<mainsz; i+= 16){
+		ri512 undertest = load_zvalue_unaligned(a + i);
+		int m = first_equal_zvalue(needle, undertest);
+		if(m != -1) return i + m;
+	}
+
+	for( i = mainsz; i < n; i += 1)
+		if(a[i] == x) return i;
+}
+#+end_src
+
+
+
+
+* Больше интринсиков и blend (36:16)
+- Есть доволно много интринсиков, работающих с векторными инструкциями
+- Общий паттерн для AVX512 довольно прост, но частые случаи утомительны
+#+begin_src cpp
+__mm512[_maskprefix_]_<intrin_op>_<suffix>
+#+end_src
+- Вставка в конкретную позиции вектора: insert
+#+begin_src cpp
+__m512i _mm512_insert32x4(__m512i a, __m128i b, int imm);
+#+end_src 
+- Чтение из конкретной позиции вектора: extract
+#+begin_src cpp
+__128i _mm512_extract32x4_epi32(__m512i a, int imm)
+#+end_src
+- Интринсик (intrinsic) - Один в один совпадает с asm инструкцией (или 0.5 инструкции при оптимизации двух)
+** Blend
+- Эффект "смешивания" можно получить над парой регистров, взяв из них в результат только тот, который нужен
+#+begin_src cpp
+m16 mask = 0xF0F0;
+z0 = set_zvalue(16);
+z1 = set_zvalue(20);
+z2 = blend_zvalues(mask, z1, z0); // false, true
+#+end_src
+- Здесь в z2 будет то что было в z0 там где маска true и z1 там где она false
+- Маска считается от нижних к верхним
+** Маскированные инструкции
+#+begin_src cpp
+ri512 mask_load_zvalue(ri512 src, const void *memory, m16 mask);
+#+end_src
+
+
+
+
+* Второй пример: argmin (42:00)
+#+begin_src cpp
+int argmin_simd(const int *a, int n){
+	int i, k;
+	int min_arr[16], idx_arr[16];
+
+	// current indicies and increment step
+	ri512 cur = set_zvalues(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+	ri512 step = set_zvalue(16);
+
+	// current minimum and its position (start with maxint an 0)
+	ri512 min = set zvalue(INT_MAX);
+	ri512 argmin = set_zvalue(0);
+
+	int mainsz = (n / 16) * 16;
+
+	for( i = 0; i<mainsz; i+=16){
+		ri512 udertest = load_zvalue_unaligned(a+i);
+		m16 mask = greater_eq_zvalue_mask(min, undertest);
+		argmin = blend_zvalues(mask, argmin, cur);
+		min = min_zvalues(min, undertest);
+		cur = add_zvalues(cur, step);
+	}
+
+	// unwrap min_arr
+	store_zvalue_unaligned(min_arr, min);
+	store_zvalue_unaligned(idx_arr, argmin);
+
+	k = 0;
+	for( int i = 1; i<16; i+=1){
+		if(min_arr[i] < min_arr[k]) k = i;
+		if(min_arr[i] == min_arr[k] && idx_arr[i] < idx_arr[k]) k = i;
+	}
+	k = idx_arr[k];
+	// process tail
+	// ...
+	return k;
+}
+#+end_src
+- Здесь мы также не напрягаем branch predictor
+
+
+
+
+* Перестановки (57:14)
+#+begin_src cpp
+__mm512_permutexvar_epi32(idx, src)
+#+end_src
+| src: | 15 | 14 | 13 | 12 | 20 | 20 | 20 | 20 | 7 | 6 | 5 |  4 | 20 | 20 | 20 | 20 |
+| idx: | 15 | 14 | 13 | 11 | 12 | 10 |  9 |  8 | 7 | 6 | 5 |  3 |  4 |  2 |  1 |  0 |
+| dst: | 15 | 14 | 13 | 20 | 12 | 20 | 20 | 20 | 7 | 6 | 5 | 20 |  4 | 20 | 20 | 20 |
+- Перестановка задается двумя строками из которых вы видите одну (idx)
+- Перестановки можно записывать циклами (перестановки без потери информации), цикличискую запись SIMD не умеет
+- В SIMD есть перестановки с потерей информации (idx не включает часть индексов)
+
+
+
+
+
+* Третий пример: copy_if_less (01:00:17)
+#+begin_src cpp
+__attribute__(alligned(64))) int permutation [(1 << 16)][16];
+int copy_if_less_simd(const int *a, int *b, int n, int p){
+	int k = 0, i;
+	int mainsz = (n / 16) * 16;
+	ri512 pred = set_zvalue(p);
+	for(i = 0; i < mainsz; i+=16){
+		ri512 x, idx, y;
+		m16 mask;
+
+		x = load_zvaule_unaligned(a+i);
+		mask = greater_zvalue_mask(pred, x);
+		idx = load_zvalue_unaligned(permutation + mask);
+		y = permute_zvalue(idx, x);
+		store_zvalue_unaligned(b + k, y);
+		k+=__builtin_popcounct(mask);
+	}
+	for (i = mainsz; i < n; i+=1)
+		if(a[i] < p)
+			b[k++] = a[i];
+	return k;
+}
+#+end_src
+- Таблица получается большой. Нам надо хранить 65536 * 16 целых чисел примерно = 2mb
+- Идея: векторизовать с YMM регистрами
+- Тогда таблица сокращается до 256 * 8 целых чисел, примерно 4 килобайта
+- Производительность может быть сильно не пострадает, т.к. ключевые решения те же
+** Домашняя наработка
+#+begin_src cpp
+void precalc(){
+	int m;
+	for(m = 0; m < (1 << MASK_WIDTH); m++){
+		int k = 0, i;
+		for(i = 0; i<<MASK_WIDTH; ++i)
+			if( m >> i & 1)
+				permutation[m][k++] = i;
+	}
+}
+#+end_src
+
+
+
+
+* Сортирующие сети (01:13:12)
+- Впервые начали исследовать в 1954
+- Zero-one principle
+- Если сеть сортирует все возможные последовательности из нулей и единиц, она сортрующая
+- Это позволяет оценить построенную сеть за O(2^n)
+- Не лучшая асмтотика заставляет нас искать другие в т.ч. индуктивные методы строить сети
+- selection principle and insertion principle (bubble)
+- insertion-selection networks (пирамида)
+- odd-even transposition networks (6 линий - 6 слоев перемычек)
+- В 1968 Кен Батчер предложил механизм построения сетей (odd-even merge) основанный на идее битонических последовательностей
+
+
+
+
+* Битонические последовательности (01:22:16)
+- Неубывающая(невозрастающая) последовательность называется монотонической (монотонной)
+- Битоническая последовательность состои из двух разных монотонных
+- Bitonic split: для каждого i от 0 до N/2 - 1 сравним его с i + N/2 и если он больше, обменяем их местами
+- В итоге получится последователность, каждая половина которой bitonic и первая строго больше левой
+** От несортированной к битонической (bitonic merge)
+- Каждые два элемента уже bitonic
+- Отсортируем подпоследовательности из двух элементов, делая левую возрастающей а правую убывающей
+- Далее по четыре по восемь и тд
+- Справа каждый шаг предполагает, что мы умеем сортировать битоническую последовательность
+- Но мы действительно умеем сплитами
+** От битонической к сортированной (bitonic split)
+- Если у нас есть битоническая последовательность, мы делаем серию сплитов и очень быстро делаем ее сортированной
+- Это можно обобщить в сеть
+
+
+
+
+* Сортировка внутри векторного регистра (01:32:38)
+** Реализация сетей: коммутаторы
+- Базовой коммутатор попарно сортирует значения в регистрах
+#+begin_src cpp
+ri512 sort_pairwise(ri512 vals, ri512 perm, m32 mask){
+	ri512 exch = permute_zvalue(perm, vals);
+	ri512 vmin = min_zvalues(vals, exch);
+	ri512 vmax = max_zvalues(vals, exch);
+	return blend_zvalues(mask, vmin, vmax);
+}
+#+end_src
+- Имея коммутатор мы можем строить сеть прямо по схеме
+#+begin_src cpp
+// шаг B1
+perm0 = setr_zvalues(1, 0, 3, 2, 5, 4, 7, 6, ....);
+mask0 = make_bitmask(0, 1, 0, 1, 0, 1, 0, 1, ....);
+#+end_src
+- Сортировочные сети быстро становятся непрактичными для собственно сортировки (сеть на 64 ел.)
+- Но они хороши как подпрограммы для других задач, например медианных фильтров, teamsort
+
+
+
+
+* Вращение и сдвиги (01:37:25)
+#+begin_src cpp
+ri512 rotate_zvalue(ri512 r0, int amt) {
+	ri512 idx;
+	int shift, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P;
+	if((amt % 16) == 0) return r0;
+	shift = (amt > 0)? (16 - (amt%16)) : -amt;
+	A = (shift + 0) % 16;
+	// ...
+	idx = setr_zvalues(A, ..., P);
+	return permute_zvalue(idx, r0);
+}
+#+end_src
+- возможно это не лучший rotate
+- для сдвига можно воспользоваться blend
+- сдвиг может быть и для пары регистров
+
+
+
+
+* Медианные фильтры и завершение (01:43:12)
+- Классика убирания шумов с сигнала это медианный фильтр
+- Идея в том, что мы заменяем каждую точку медианой трех до и трех после нее
+- Медиана семи точек это четвертый элемент в сортированном массиве семи элементов
+- Можем ли мы использовать сортировку и сдвиг чтобы сделать медианный фильтр?
+
+
+
+
+
+
+
+
+
+
+
