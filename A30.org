@@ -9,7 +9,6 @@
 * Определители (00:00)
 - Что такое определитель?
 - Есть система линейных уравнений:
-#+begin_src org
 - a11x1+a12x2=b1
 - a21x1+a22x2=b2
 - Решений нет если коэффиценты пропорциональны (Определитель равен нулю):
@@ -27,7 +26,6 @@
 | a21 | b2 |
 - Второй физ смысл определителя это векторное произведение
 - Третий вектор перп им обоим и пропорц площади параллелгр
-#+end_src
 - determinant and permanent
 - Способ посчитать перманент лучше O(fact(n)) неизвестен
 ** Генерация интересных матриц
@@ -75,11 +73,11 @@ for(currebt = 0; current < N; ++current){
 - Локальное решение problem DT:
 #+begin_src cpp
 lapack_int LAPACKE_dgetrf(int matrix_layout,
-													lapack_int m,
-													lapack_int n,
-													double *a,
-													lapack_int lda,
-													lapack_int *p);
+                          lapack_int m,
+                          lapack_int n,
+                          double *a,
+                          lapack_int lda,
+                          lapack_int *p);
 #+end_src
 - dgetrf сохраняет в матрице a разложение на LU, а в массиве P перестановки
 - Основана на BLAS
