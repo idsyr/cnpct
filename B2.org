@@ -99,7 +99,7 @@ int foo(const Heavy &fst, const Heavier &snd);
 
  
 * Треугольники (36:11)
-- n-to-m и модульное(unit) тестирование 
+- end-to-end и модульное(unit) тестирование 
 
 
 
