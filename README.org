@@ -1,0 +1,12 @@
+#+TITLE:
+  ____ _   _ ____   ____ _____
+ / ___| \ | |  _ \ / ___|_   _|
+| |   |  \| | |_) | |     | |
+| |___| |\  |  __/| |___  | |
+ \____|_| \_|_|    \____| |_|
+#+AUTHOR: idsyr
+#+DESCRIPTION: cnpct repo readme 
+#+STARTUP: showeveryhing
+#+OPTIONS: toc:2
+
+
