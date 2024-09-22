@@ -1,0 +1,245 @@
+#+TITLE: Базовый курс C++ (MIPT, ILab). Lecture 1. Scent of C++.
+#+AUTHOR: idsyr
+#+DESCRIPTION: B1
+#+STARTUP: showeveryhing
+#+OPTIONS: toc:2
+
+
+
+* Кеши (01:55)
+** Проблема из реального мира
+- Программа, которая оперирует миллионами страниц разного размера, различающихся уникальным номером
+#+begin_src cpp
+struct page {
+  int index;
+  int sz;
+  int *data; }
+#+end_src
+
+
+- Единственный способ получить ее это получить ее по сети довольно медленной функцией
+#+begin_src cpp
+void slow_get_page(int n, struct page *p);
+#+end_src
+
+
+- Локально у нас есть место всего на несколько тысяч страниц
+- Что делать? Решение ->
+** Кеш
+- LRU стратегия
+  
+
+
+
+* LRU на языке C и ее проблемы (09:50)
+- Нужно написать двусвязный список и тесты к нему
+#+begin_src cpp
+// .c:
+typedef struct list_node {
+  struct list_node *prev;
+  struct list_node *next;
+  struct page *page;
+} list_node_t;
+
+typedef struct list {
+  list_node_t *top;
+  list_node_t *end;
+} list_t;
+// .h:
+list_t* list_create();
+int list_size(const list_t *list);
+page_t list_ret(list_t *list);
+void list_popback(list_t *list);
+void list_pushfront(list_t *list, page_t *page);
+void list_move_upfront(list_t *list, page_t *page);
+void list_free(list_t* list);
+#+end_src
+
+
+- Нужно написать хеш-таблицу
+#+begin_src cpp
+typedef struct hashmap_entry{
+  int key;
+  list_node *node; 
+} hashmap_entry_t;
+
+typedef struct hashmap_node {
+  struct hashmap_node *next;
+  struct hashmap_entry entry;
+} hashmap_node_t;
+
+typedef struct hash {
+  struct hashmap_node **htab;
+  int len;
+} hash_t;
+
+
+hash_t *htable_create(int len);
+list_node_t *htable_find(hash_t *h, int key);
+void htable_insert(hash_t *h, int key, page_t *data);
+void htable_erase(hash_t *h, int key);
+void htable_free(hash_t *h);
+#+end_src
+
+
+- Собственно кэш
+#+begin_src cpp
+cache_t *cache_create(int cache_size);
+void cache_free(cache_t *c);
+typedef struct page_t *(*slow_get_page_t)();
+bool cache_lookup_update(cache_t *c, int ley, slow_get_page_t slow_f);
+//.c:
+struct cache{
+  int sz;
+  hash_t hash;
+  list_t list;
+}
+#+end_src
+
+
+- Завтра вам понадобится кеш для новго типа данных
+- Еще хуже: Завтра вам понадобится кеш для друго типа ключей
+- Неэффективный рехеш -> один список и указатели внутрь него
+    
+
+
+
+* Обьединение данных и методов (22:05)
+- Одной из главных особенностей С++ является обьединение данных и методов их обработки
+- Не обязательно определять функцию внутри
+- Таким образом с методами занесенными внутрь структуры, мы работаем так же как и с полями через точку либо через стрелочку
+- Хорошо спроектированная структура данных на С часто также берет "указатель на себя" первым параметром
+- Делая его неявным, мы как бы говорим "сделай себя"
+- Указывать явный this иногда необходимо. 
+#+begin_src cpp
+struct Point {
+  double x, y;
+};
+struct Triangle {
+  struct Point pts[3];
+  double square() const;
+};
+double Triangle::square() const {/* pts[1/2/3].x/y usage */}
+int main(){
+  /* ... */
+  double sq = t.square();
+  std::cout << sq << std::endl;
+}
+#+end_src
+- Писать методы классов не менее эффективно чем писать обычные функции, до тех пор пока вы помните что поля класса адресуются через указатель
+- В полях класса есть один уровень неявной косвенности
+
+
+
+
+* Обобщение типов и функций (33:56)
+- Еще одна важная концепция это обобщение через механизм шаблонов
+#+begin_src cpp
+template <typename T> struct Point { T x, y; };
+Point<int> pi;
+Point<double> pd;
+#+end_src
+
+
+- Тот же треугольник можно обобщить на любые типы точек
+- С одной стороны обобщение создает возможности
+- С другой стороны создает проблемы
+- Итераторы и алгоритмы во второй части курса
+- Пожалуй единственным способом написать на С максимум двух чисел является макрос
+#+begin_src cpp
+#define MAX(X,Y) (( (X) > (Y) ) ? (X) : (Y) )
+#+end_src
+
+
+- Проблема в побочных эффектах и производительности (скорее как следствие)
+- На С++ шаблон функции лишен этих проблем
+#+begin_src cpp
+template <typename T> T max(T x, T y){
+  return (x > y) ? x : y;}
+#+end_src
+
+
+- Поэтому в стандартной библиотеке С++ есть std::max
+
+
+** Обобщение вместо void*
+- Стандартная функция из библиотеки С
+#+begin_src cpp
+void qsort(void* base, size_t num, size_t size, int (*compar)(const void*, const void*));
+#+end_src
+
+
+- Первая итерация: отказ от void*
+#+begin_src cpp
+template <typename T, typename Comp>
+void qsortpp(T* base, size_t num, Comp compare);
+#+end_src
+
+
+- Вторая итерация: вместо передачи укаазателя и длины, можно передавать два указателя на начало и конец интервала  
+#+begin_src cpp
+template <typename T, typename Comp>
+void qsortpp(T* start, T* fin, Comp compare);
+#+end_src
+
+
+- Третья итерация: вместо указателей можно использовать указателе подобные обьекты (итераторы) и получить:
+#+begin_src cpp
+template <typename It, typename Comp = std::less>
+void sort(It start, It fin, Comp compare);
+#+end_src
+
+
+- И дело в производительности:
+ - qsort не может заинлайнить компаратор
+- Проблемы:
+ - Должен жить в заголовке (на самом деле не должен explicit template instantiation)
+ - Замусоривает код
+
+
+** Стандартная библиотека
+ - С++ имеет массу стандартных обобщенных контейнеров и обобщенных алгоритмов над ними
+
+   
+ 
+
+* LRU на языке C++ (50:18)
+- использование namespace
+- использование const методов
+- подчеркивание в конце это поле класса
+- идея конструктора
+
+
+
+ 
+* Идея конструктора и немного фана (57:10)
+- Напишем простой конструктор
+#+begin_src cpp
+template <typename T, typename KeyT = int>
+struct cache_t {
+  size_t sz_;
+  cache_t(size_t sz) : sz_(sz) {}
+  // ...
+  std::cin >> sz;
+  caches::cache_t<int> c{sz};
+#+end_src
+
+
+- Теперь попытка создать кеш без параметров это ошибка
+- хорошо написанный тип обладает value semantic (схож с int)
+- у int есть const спецификатор меняющий поведение, чтобы использовать методы с const обьектами пользовательского типа требуется аннотировать методы const спецификатором
+- кеш который утекает по косвенности, если он от кого то зависит, требует какой то указатель при своем конструировании, то он уже не обладает value semantic
+- писать c value semantic это важно и конструктор это первый шаг к этому 
+- value semantic - такой же естественный тип как int & float
+
+
+
+* Немного о домашних заданиях (01:04:22)
+* Литература и ответы на вопросы (01:12:04)
+
+
+
+
+
+
+
