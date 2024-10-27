@@ -1,0 +1,308 @@
+#+TITLE: Базовый курс C++ (MIPT, ILab). Lecture 6. Приведение типов
+#+AUTHOR: idsyr
+#+DESCRIPTION: B1
+#+STARTUP: showeveryhing
+#+OPTIONS: toc:2
+
+
+
+
+* Статические функции и друзья
+** Конструкторы
+#+begin_src cpp
+  template <typename T> class Matrix {
+    public:
+    // конструктор для создания матрицы, заполненной значением
+    Matrix(int cols, int rows, T val = T{});
+    // конструктор для создания из заданной последовательности
+    template <typename It>
+    Matrix(int cols, int rows, It start, It fin);
+  }
+#+end_src
+- Как написать конструктор для создания единичной матрицы?
+- Тегирующие типы выглядят криво, поэтому статические функции
+
+** Обсуждение
+- Инвариантом любого RAII класса является владение
+
+
+** Статические методы и друзья
+#+begin_src cpp
+  class S{
+    int x = 0;
+    public:
+    int get_x() const {return x;}
+    static int s_get_x(const S *s) {return s->x;} // отличается тем что к ней не приходит this*
+    friend int f_get_x(const S *s);
+  }
+  int f_get_x(const S *s) {return s->x;}
+#+end_src
+- Наличие friend функций обессмысливает RAII классы
+** Диаграмма возможностей
+| _________________________________________ | методы | статические ф | друзья |
+| Получает неявный указатель на this        | +      | -             | -      |
+| Находится в пространстве имен класса      | +      | +             | -      |
+| Имеет доступ к закрытому состоянию класса | +      | +             | +      |
+
+
+
+** Конструкторы
+#+begin_src cpp
+  static Matrix eye(int n, int m);
+#+end_src
+
+
+
+* Проектирование матрицы
+- аннотация noexcept
+- селекторы
+- Бинарные операторы должны быть определены вне класса, что не касается других операторов и вспомогательных для бинарных операторов методов
+- Методы, которые возвращают ссылки лучше аннотировать как lvalue rvalue ref
+
+
+
+* Индексаторы и прокси-классы
+#+begin_src cpp
+  int& operator[](int x) {return v[x];}
+  const int& operator[](int x) const {return v[x];}
+#+end_src
+- Но в матрице мы бы не хотели возвращать int* и раскрывать внутренее
+
+** Прокси-обьекты
+#+begin_src cpp
+  template <typename T> class Matrix {
+    struct ProxyRow {
+      T *row;
+      const T& operator[](int n) const {return row[n]; }
+      T& operator[](int n) {return row[n]; }
+    };
+    public:
+    ProxyRow operator[](int);
+  };
+#+end_src
+
+
+** Обсуждение
+- Уже было
+  - Приведение
+  - Присваивание
+  - Разыменование
+  - Стрелочка
+  - Индексаторы
+- Все они могут быть только методами 
+  
+
+
+
+* unique pointers и литература
+- Основная идея: использовать для передачи управления перемещение
+#+begin_src cpp
+  unique_ptr(unique_ptr& rhs) = delete;
+  unique_ptr(unique_ptr&& rhs) : ptr_(rhs.ptr_){
+    rhs.ptr_ = nullptr;
+  }
+  unique_ptr* operator= (unique_ptr &&rhs){
+    swap(*this, rhs); return *this;
+  }
+#+end_src
+- и это std::unique_ptr
+** Удобное создание
+- Пока что выглядит немного волшебством
+#+begin_src cpp
+  int foo (int x, double y) {
+    auto res = std::make_unique<MyRes>(x, y); // захват
+    // ,,,
+    if(IsSomething()){
+      bar(std::move(res)); // корректная передача владения
+      return 1;
+    }
+    // ,,,
+    return 0; // освобождается в деструкторе
+  }
+#+end_src
+- const unique_ptr<MyRes> p{new MyRes(x, y)}; блокирует:
+  - копирование, потому что он unique_ptr
+  - перемещение, потому что он const
+    
+
+
+
+
+
+* Приведение типов
+** Типы гораздо важнее в С++ чем в С
+- В заголовок этого неслайда вынесено неоспоримое утверждение
+  - Типы участвуют в разрешении имен
+  - Типы могут иметь ассоциированное поведение
+  - За счет шаблонной параметризации, типов может быть куда больше, и их куда проще порождать из обобщенного кода
+- Но при всем этом, любой обьект это просто кусок памяти
+#+begin_src cpp
+  float f = 1.0;
+  char x = *((char *)&f + 2); // это легально. Что в x?
+#+end_src
+
+** Обсуждение
+- Не имеет ли приведение в стиле С (реитерпретация памяти) темных сторон?
+- Конечно имеет. Она слишком разрешающая. Есть некая разница между
+  - Приведением int к double
+  - Приведением const int* к int*
+  - Приведением int* к long
+- Первое это обычное дело, второе это опасное снятие внутренней константности, третье за гранью добра и зла, но в языке С все это пишется одинаково
+
+
+** Приведения в стиле С++
+- static_cast - обычные безопасные преобразования
+#+begin_src cpp
+  int x; double y = 1.0;
+  x = static_cast<int>(y);
+#+end_src
+- const_cast - снятие константности или волатильности
+#+begin_src cpp
+  const int *p = &x;
+  int *q = const_cast<int*<(p);
+#+end_src
+- reinterpret_cast - слабоумие и отвага
+#+begin_src cpp
+  long long uq = reinterpret_cast<long long(q);
+#+end_src
+
+
+** Избегаем reinnterpret-cast in C++20
+- Побитовая реинтерпретация значения очень коварна
+#+begin_src cpp
+  float p = 1.0;
+  int n = *reinterpret_cast<int*>(&p); // [basic.lval/11] UB strict aliasing violation
+#+end_src
+- Чтобы вы так не делали, в С++ появилась функция std::bit_cast
+#+begin_src cpp
+  int m = std::bit_cast<int>(p);
+#+end_src
+- Она делает примерно следующее:
+#+begin_src cpp
+  std::memcpy(&m, &p, sizeof(int));
+#+end_src
+
+- static cast пытается наиболее близко сохранить семантическое значение
+- Если вы делаете reinterpret_cast функции к битовому значению и затем обратно к какому то указателю, то "результат не должен быть surprising"
+** Static cast это явное преобразование
+- Уже расмотренные нами explicit конструкторы регламентируют необходимость static_cast
+#+begin_src cpp
+  struct T {};
+  struct S { explicit S(T) {} };
+  void foo(S s) {}
+  foo(T); //Fail
+  foo(static_cast<S>(T)); // OK
+  // то же самое касается синтаксиса копирующей инициализации
+  T x; S x = static_cast<S>(y); // OK
+#+end_src
+
+
+** Functional style cast in C++
+- Функциональный каст это C-style cast вывернутный наизнанку
+#+begin_src cpp
+  int a = (int)y;
+  int b = int(y); // functional style C-style cast
+#+end_src
+
+
+** Обсуждение
+- Кроме того, что С++ style casts позволяют четко указать что вы хотите, они еще и лучше видны а коде
+- По ним проще искать, чтобы их удалить, потому что вообще-то в статически типизированном языке преобразование типов это сигнал о проблемах в проектировании
+- Самый "безопасный" static_cast на самом деле самый сложный т.к. у него нет четких правил что на входе и что на выходе
+- static_cast определяет явные преобразования. Но как типы преобразуются неявными преобразованиями?
+
+  
+
+* Целочисленные продвижения
+** Особенности неявного приведения
+- В наследство от языка С нам достались неявные арифметические преобразования
+#+begin_src cpp
+  int a = 2; double b = 2.8;
+  short c = a * b; // c = 5
+#+end_src
+- Со своими странностями и засадами
+#+begin_src cpp
+  unsigned short x = 0xFFFE, y = 0xEEEE; // x*y = 0xEEEC2224
+  unsigned short v = x * y;              // 0x2224
+  unsigned w = x * y;                    // 0xEEEC2224
+  unsigned long long z = x * y;          // 0xFFFFFFFFEEEC2224
+  // Они приводятся к signed int
+#+end_src
+
+
+** Особенности неявного приведения
+*** Сишные правила (применять сверху вниз)
+- type 'op' fptype => fptype 'op' fptype
+  - Порядок: long double, double, float
+- type 'op' unsigned itype => unsigned itype 'op' unsigned itype
+- type 'op' itype => itype 'op' itype
+  - порядок: long long, long, int
+- (itype less then int) 'op' (itype less then int) => int 'op' int
+  - Любые комбинации (unsigned) short и (unsigned) char
+  
+
+
+
+* Унарный плюс и унарный минус
+** Унарный плюс (positive hack)
+- Оператор унарного плюса интересен тем, что для почти всех встроенных типов он не значит ничего. Например 2 == +2
+- Но при этом он, даже если не перегружен, предоставляет легальный способ вызвать приведение к встроенному типу
+#+begin_src cpp
+  struct Foo { operator long() {return 42;}};
+  void foo(int x);
+  void foo(Foo x);
+  Foo f;
+  foo(f);  // foo(Foo)
+  foo(+f); // foo(int)
+#+end_src
+
+
+** Ваши типы как встроенные
+- Собственный класс кватернионов
+#+begin_src cpp
+  template<typename T> struct Quat {
+    T x, y, z, w;
+  };
+#+end_src
+- У нас уже есть бесплатное копирование и присваивание. Хотелось бы чтобы работало все остальное: сложение, умножение на число и так далее
+#+begin_src cpp
+  Quat q{1, 2, 3, 4};
+  Quat p = -q; // унарный минус {-1, -2, -3, -4}
+#+end_src
+
+** Общий синтаксис операторов
+- Метод вне класса и метод в классе
+#+begin_src cpp
+  template<typename T> struct Quat {
+    Quat opeartor-() const {
+      return Quat {-x, -y, -z, -w};
+    }
+  };
+#+end_src
+- Таким образом есть два варианта (исключение: присваивание и пара-тройка других)
+- -a означает a.operator-()
+- -a означает operator-(a)
+- Выиграет тот который в классе
+
+
+** Обсуждение
+- Перегрузить operator- для int --> ошибка компиляции
+#+begin_src cpp
+  int operator-(int x){
+    std::cout << "MINUS" << std::ednl;
+    return x;
+  }
+#+end_src
+- Перегрузить operator- для всего подряд в том числе и для int -->  Неправильные шаблонные варианты будут тихо проигнорированы (SFINAE)
+#+begin_src cpp
+  template <typename T> T operator-(T x) {
+    std::cout<<"MINUS"<<std::endl;
+    return x;
+  }
+#+end_src
+- Перегрузка операторов дает нам производительность и возможности, но мотивация будет в B7.org
+
+
+
+
+

@@ -1,0 +1,530 @@
+#+TITLE: Базовый курс C++ (MIPT, ILab). Lecture 7. Перегрузка операторов
+#+AUTHOR: idsyr
+#+DESCRIPTION: B1
+#+STARTUP: showeveryhing
+#+OPTIONS: toc:2
+
+
+
+* Функторы и производительность (помощь с перфомансом)
+- Указатель на функцию нельзя заинлайнить
+
+** Функторы: постановка проблемы
+- Эффективность std::sort резко проседает если для его обьектов нет operator< и нужен кастомный предикат
+#+begin_src cpp
+  bool gtf(int x, int y) {return x > y;}
+  std::sort(myarr.begin(), myarr.end(), &gtf);
+#+end_src
+
+** Функторы: первый вариант решения
+- Функтором называется класс, который ведет себя как функция
+- Простейший способ это неявное приведение к указателю на функкцию
+#+begin_src cpp
+  struct gt {
+    static bool gtf(int x, int y) {return x > y;}
+    using gtfptr_t = bool(*)(int, int);
+    operator gtfptr_t() const { return gtf(x, y); }
+  };
+  // гораздо лучше: теперь возможна подстановка
+  std::sort(myaarr.begin(), myarr.end(), gt{});
+#+end_src
+- Увы, это жутковато выглядит и плохо расширяется
+
+
+** Функторы: перегрузка ()
+- Более правилььный способ сделать функтор это перегрузка вызова
+#+begin_src cpp
+  struct gt {
+    bool operator() (int x, int y) {return x > y;}
+  };
+  // все также хорошо
+  std::sort(myarr.begin(), myarr.end, gt{});
+#+end_src
+- Почти всегда это лучше, чем указатель на функцию
+- Кроме того в классе можно хранить состояние
+- Функторы с состоянием получат второе дыхание когда мы дойдем до так называемых лямбда-функций
+
+
+** invim
+#+begin_src cpp
+  #include <cassert>
+  myless lessppred;
+  bool b = lesspred(1, 2);
+  assert(b == false);
+  // std::sort(narr, narr+nelts, myless{});
+  std::sort(narr, narrr+nelts, lesspred);
+#+end_src
+- Лямбда - не функция, это что то вроде класса с перегруженным оператором круглые скобочки (на самом деле нет, хаха (упрощенно))
+#+begin_src cpp
+  std::sort(narr, narr + nelts, [](auto lhs, auto rhs){return lhs > rhs;});
+#+end_src
+
+
+
+
+* Pimpl и делетеры (помощь с абстракцией)
+- pointer to implementation
+- Идиома Pimpl предполагает единичное владение
+#+begin_src cpp
+  class Ifacade {
+    CImpl *impl_;
+    public:
+    Ifacade() : impl_(new CImpl) {}
+    // methods
+  };
+#+end_src
+- Эта идиома очень полезна: в частности она позводяет всегда иметь обьект класса одного и того же размера, что может быть очень выжно в ABI
+- Однако IFacade становится RAII классом
+- Хотелось бы заменить CImpl * на unique_ptr, но...
+
+
+
+** Проблема неполного типа
+- Попробуем использовать unique ptr в Pimpl
+#+begin_src cpp
+  class MyClass; // предварительное обьявление
+  struct MyWrapper {
+    MyClass *c; // это ок
+    MyWrapper() : c(nullptr) {};
+  }
+  struct MySafeWrapper {
+    unique_ptr<MyClass> c; // увы, не компилируется
+    MySafeWrapper() : c(nullptr) {};
+  }
+#+end_src
+
+
+** Как реально выглядит unique_ptr?
+- Стратегия удаления у него вынесена в параметр шаблона
+#+begin_src cpp
+  template <typename T, typename Deleter = deafult_delete<T>>
+  class unique_ptr {
+    T *ptr_; Deleter del_;
+    public:
+    unique_ptr(T *ptr = nullptr, Deleter del = Deleter()) :
+      ptr_(ptr), del_(del) {}
+     ~unique_ptr() {del_(ptr_); } 
+  }
+#+end_src
+- Как мог бы выглядеть default_delete?
+
+
+** Решение: пользовательский делетер 
+#+begin_src cpp
+  class MyClass; // предварительное обьявление
+  struct MyClassDeleter {
+    void operator()(MyClass *); // определен где то еще
+  };
+  struct MySafeWrapper {
+    unique_ptr<MyClass, MyClassDeleter> c;
+    MySafeWrapper() : c(nullptr) {}; // ok
+  }
+#+end_src
+
+
+** Тизер: влияние на размеры
+- Влияет ли на размер необходимость хранить удалитель
+  - Да, но этого можно избежать
+
+
+
+* Базовая арифметика
+** Источник названия языка
+- Язык С++ получил название от операции ++ (постинкремента)
+- Бывает также преинкремент
+- Для их переопределения используется один и тот же operator++
+#+begin_src cpp
+  Quat<T>& Quat<T>::operator++(); // это pre-increment
+  Quat<T> Quat<T>::operator++(int); // это post-increment
+#+end_src
+- Дополнительный аргумент в постинкременте липовый
+- Обычно постинкремент делается в терминах преинкремента
+#+begin_src cpp
+	template<typename T> struct Quat {
+		T x_, y_, z_, w_;
+		Quat<T>& Quat<T>::operator++() {x_ += 1; return *this; }
+		Quat<T>  Quat<T>::operator++(int){
+			Quat<T> tmp {*this};
+			++(*this);
+			return tmp;
+			
+		}
+	};
+#+end_src
+
+
+
+** Обсуждение
+- "неэффективный" обход контейнера
+#+begin_src cpp
+  using itt = typename my_container<int>::iterator;
+  for(itt it = cont.begin(); it != cont.end(); it++){
+    // do beer
+  }
+#+end_src
+- эффективно использовать преинкремент и не делать вызов в проверке условия
+#+begin_src cpp
+  for(itt it = cont.begin(), ite = cont.end(); it !- ite; ++it){
+    // do beef
+  }
+#+end_src
+
+
+
+* Бинарные операторы
+
+** Цепочечные операторы
+- Операторы, образующие цепочки имеют вид op=
+#+begin_src cpp
+	int a = 3, b = 4, c = 5;
+  a+=b*=c-=1;
+#+end_src
+- Все они правоассоциативны
+- Исключение составляют очевидные бинарные >= <=
+- Все они модифицируют свою правую(? может ? левую ?) часть и их место внутри класса в качестве его методов
+
+- Например для кватернионов
+#+begin_src cpp
+  struct Quat {
+    int x, y, z, w;
+    Quat& operator+=(const Quat& rhs)  {
+      x += rhs.x; y+=rhs.y; z += rhs.z; w+=rhs.w;
+      return *this;
+    }
+  };
+#+end_src
+- Здесь возврат ссылки нужен чтобы организовать цепочку
+
+
+** Определение через цепочки
+#+begin_src cpp
+  struct Quat {
+    int x, y, z, w;
+    Quat& operator+=(const Quat& rhs);
+    Quat operator+(const Quat* rhs) const {
+      Quat tmp(*this); tmp += rhs; return tmp;
+    }
+  }
+#+end_src
+- Чем плоха идея теперь определить в классе и оператор+?
+
+** Неявные преобразования
+- Часто мы хотим чтобы работали неявные преобразования
+#+begin_src cpp
+  Quat::Quat(int x);
+  Quat Quat::operator+(const Quat& rhs);
+  Quat t = x + 2; // ok, int -> Quat
+  Quat t = 2 + x; // FAIL
+#+end_src
+- Увы, метод класса не преобразует свой неявный аргумент
+- Единственный вариант делать настоящие бинарные операторы это делать их вне класса
+#+begin_src cpp
+  Quat::Quat(int x);
+  Quat operator+(const Quat& lhs, const Quat& rhs);
+  Quat t = x + 2; // ok, int -> Quat rhs
+  Quat t = 2 + x; // ok, int -> Quat lhs
+#+end_src
+
+**  Призыв к осторожности
+- Одновременное наличие implict ctors и внешних операторов может вызывать странные эффекты
+#+begin_src cpp
+  struct S {
+    S(std::string) {}
+    S(std::wstring) {}
+  };
+  bool operator==(S lhs, S rhs) {retuirn true;}
+  assert(std::string("foo"} == std::wstring{L"bar"}); // WAT?
+#+end_src
+- В таких случаях стоит рассмотреть возможность занести внутрь и сделать его friend
+
+
+** Одна небольшая проблема
+- Увы это не работает для шаблонов
+#+begin_src cpp
+  template<typename T>
+  Quat<T> operator+ (const Quat<T>& x, const Quat<T>& y) {
+    Quat<T> tmp {x};
+    tmp += y;
+    return tmp;
+  }
+#+end_src
+- Такой оператор будет скорее всего иметь проблемы с подстановкой типов потому что преобразование не работаеет через шаблонную подстановку
+- Есть два независимых процесса
+  - Шаблонная подстановка 
+  - Разрешение перегрузки с implicit cast'ами
+- И шаблонная подстановка раньше, поэтому он не догадается подставить
+- И единственный разумный способ решения это перегрузить его для T и Quat<T>, Quat<T> и T
+#+begin_src cpp
+  template <typename T>
+  Quat<T> operator+(Quat<T> lhs, Quat<T> rhs)
+    { Quat<T> tmp(lhs); tmp += rhs; return tmp; }
+  template <typename T>
+  Quat<T> operator+(T lhs, Quat<T> rhs) 
+    { Quat<T> tmp(lhs); tmp += rhs; return tmp; }
+  template <typename T>
+  Quat<T> operator+(Quat<T> tmp(lhs); tmp += rhs; return tmp; }
+#+end_src
+
+
+
+** Сравнение для basic_string
+- Принятый (в т.ч. в libstdc++) вариант решения использует перегрузки
+- Все одинаково называющиеся операторы должны быть либо снаружи либо внутри всем своим множеством
+
+
+
+
+* Консистентность
+** Обсуждение
+- Хорошим тоном является поддерживать консистентную семантику, но никто не заставляет делать это
+- В языках с перегрузкой операторов вы никогда не можете быть уверены что делает сложение сегодня утром
+- Поэтому во многих языках этой опции сознательно нет
+
+** Интермедия: невезучий сдвиг
+- Меньше всего повезло оператору сдвига, сейчас де-факто принято в языке использовать его для ввода и вывода на поток и именно в бинарной форме
+#+begin_src cpp
+  x >>= 4;
+  std::cout << x << " " << y << std::endl;
+  std::cin >> z;
+#+end_src
+- Обычно сдвиг делают все таки вне класса используя внутренний дамп
+#+begin_src cpp
+  template<typename T> struct Quat {
+    T x, y, z, w;
+    void dump(std::ostream& os) const {
+      os << x << " " << y << " " << z << " " << w;
+    }
+  };
+  template <typename T>
+  std::ostream& operator<<(std::ostream& os, const Quat<T>& q){
+    q.dump(os); return os;
+  }
+#+end_src
+
+
+** Обсуждение
+- У бинарного оператора сигнатура:
+  - (a).operatorX(b)
+  - operatorX(a,b)
+- У оператора присваивания и некотрых других есть только первая форма
+- С точки зрения языка и operator= и operator+ и operator+= это независимые бинарные операторы. По сути разные методы. Да, это понятно. Но я добавил.
+
+
+** Проблемы определения через цепочки
+- Для матриц не все так красиво
+#+begin_src cpp
+  tmeplate <typename T> class Matrix {
+    Matrix &operator+=(const Martrix& rhs);
+  };
+  Matrix operator+(const Matrix& lhs, const Matrix& rhs) {
+    Matrix tmp{lhs}; tmp += rhs; return tmp;
+  } // Здесь создается довольно дорогой временный обьект
+  Matrix x = a + b + c + d; // а здесь трижды
+#+end_src
+- Возможно стоит возвращать прокси обьект
+
+
+** Обсуждение
+- Должны ли мы сохранять основные математические свойства операций
+- Например умножение для всех встроенных типлв коммутативно
+- Имеет ли смысл тогда переопределять operator* для матриц?
+- Или оставить его для умножения матриц на число?
+
+
+
+* Сравнения и spaceship
+** Сравнения как бинарные операторы
+#+begin_src cpp
+  template<typename T>
+  bool operator== (cosnt Quat<T>& lhs, const Quat<T>& rhs){
+    return (&lhs == &rhsJ);
+  }
+  template<typename T>
+  bool operator== (const Quat<T>& lhs, const Quat<T> & rhs){
+    return (lhs.x == rhs.x) && (lhs.y == rhs.y) && ...
+  }
+#+end_src
+
+
+** Равенство и эквивалентность 
+- Базовая эквивалентность обьектов означает что их адресы равны (то есть это один и тот же обект)
+- Равенство через operator== может работать сколь угодно сложно
+- Считается что хороший оператор равенства удорвлетворяет трем основным соотношениям
+#+begin_src cpp
+  assert(a == a);
+  assert((a == b) == (b == a));
+  assert((a != b) || ((a == b) && (b == c)) == (a == c));
+#+end_src
+- Первое это рефлексивность
+  - Второе это симметричность
+    - Третье это транзитивность
+- Говорят что обладающие такими свойствами отношения являются отношениями эквивалентности
+
+
+** Дву и три валентные сравнения
+- В языке С приняты тривалентные сравенения
+#+begin_src cpp
+  strcmp(p, q); // returns -1, 0, 1
+#+end_src
+- В языке С++ приняты двувалентные сравнения
+#+begin_src cpp
+  if(p > q) 
+  if(p >= q)
+#+end_src
+- Кажется из одного тривалентного сравнения <=> можно соорудить все двувалентные
+
+
+
+** Spaceship operator
+- В 2020 году в С++ появился перегружаемый "оператор летающая тарелка"
+#+begin_src cpp
+  struct MyInt{
+    int x_;
+    MyInt(int x = 0) : x_(x) {}
+    std::strong_ordering operator<=>(const MyInt &rhs) {
+      return x_ <=> rhs.x_;
+    }
+  };
+#+end_src
+- Такое определение MyInt сгенерирует все сравнения кроме равенства и неравенства (потому что он не сможет решить какое вы хотите равенство)
+- Самое важное это концепция упорядочения
+#+begin_src cpp
+  struct S {
+    ordering type operator<=>(const S& that) const
+#+end_src
+- Всего доступны три вида упорядочения
+| Тип упорядочения      | Равные значения | Несравнимые значения |
+| std::strong_ordering  | Неразличимы     | Невозможны           |
+| std::weak_ordering    | Различимы       | Невозможны           |
+| std::partial_ordering | Различимы       | Возможны             |
+- 1: для интов 2: для даблов
+
+
+** Defaulted spaceship operator
+- Летающая тарелка это один из немногих примеров осмысленного умолчания
+#+begin_src cpp
+  struct MyInt {
+    int x_;
+    MyInt(int x = 0) : x_(x) {}
+    auto operator<=>(const MyInt &rhs) = default;
+  };
+#+end_src
+- Сгенерированный по умолчанию (изо всез полей класса) он сам определяет упорядочение и как бонус определяет также равенство и неравенство
+- Логика тут такая: если вы генерируете все по умолчанию, то вы точно не хотите от равенства ничего необычного
+
+
+* Экзотические операторы
+** Взятие адреса
+- Может быть перегружено так же, как разыменование
+#+begin_src cpp
+  template <typename T> class scoped_ptr {
+    T *ptr;
+  public:
+    scoped_ptr(T *ptr) : ptr{ptr} {}
+    ~scoped_ptr() { delete ptr; }
+    T** operator&() { return &ptr; }
+  }
+#+end_src
+- В реальности перегружается редко 
+- std::adressof(a) выводит настоящий аддрес
+
+
+** Ограничения
+- Операторы разыменования (*) и разыменования с обращением (->) обязаны быть методами
+
+
+
+** Указатели на методы классов 
+- Имеет ли смысл выражение "указатель на нестатический метод"?
+#+begin_src cpp
+  struct MyClass { int DoIt(float a, int b) const; };
+#+end_src
+- На удивление да
+#+begin_src cpp
+  using constif_t = int (MyClass::*)(float, int) const; // ::* нельзя перегружать
+#+end_src
+- Поддерживается два синтаксиса вызова
+#+begin_src cpp
+  constif_t ptr = &MyClass::DoIt;
+  MyClass c; (c.*ptr)(1.0, 1); // .* нельзя перегружать
+  MyClass *pc = &c; (pc->*ptr)(1.0, 1); // ->* перегружать можно
+#+end_src
+
+
+** Волшебные свойства ->*
+- Оператор ->* примичателен своим никаким приоритетом и никаким требованиями к перегрузке
+- Как следствие его где только не используют
+#+begin_src cpp
+  template <typename T> T& operator->*(pair<T, T> &l, bool t){
+     return r ? l.second : l.first;
+  }
+  pair<int, int> y {5,6};
+  y ->* false = 7;
+#+end_src
+
+
+** Оператор запятая
+- Малоизвестен но встречается оператор запятая
+- Например он работает в приведенном цикле
+#+begin_src cpp
+  for(int i = 0, j = 0; (i + j) < 10; i++, j++)
+    { use(i, j); }
+#+end_src
+- Опертор имеет общий вид
+#+begin_src cpp
+  result = foo(), bar();
+#+end_src
+- Здесь выполняется foo, потом bar, потом в result записывается результат bar
+#+begin_src cpp
+  buz(1, (2, 3), 4); // вызовет buz(1, 3, 4)
+#+end_src
+- Удивительно, но этот оператор тоже перегружается. Это никогда не следует делать, потому что вы потеряете sequencing
+
+
+** Интермедия: sequencing
+- Выражения, разделенные точкой с запятой состоят в отношениях последования sequenced-after и sequenced-before
+#+begin_src cpp
+  foo(); bar(); // foo sequenced before bar
+#+end_src
+- Но увы, вызвов функции не определяет sequencing
+#+begin_src cpp
+  buz(foo(), bar()); // no sequencing between foo and bar
+#+end_src
+- Почему это так важно? Потому что unsequencing modification это UB case
+#+begin_src cpp
+  y = x++ + x++; // operator++ and operator++ unsequenced
+#+end_src
+- В этом примере компилятор имеет право отформатировать жесткий диск. Он вряд ли это сделает, но ситуация неприятная
+
+
+* Общий итог и литература
+** Что нельзя перегрузить
+- Доступ через точку a.b
+- Доступ к члену класса через точку a.*b
+- Доcтуп к пространству имен a::b
+- Последовательный доступ a ; b
+- Почти все специальные операторы в том числе sizeof, alignof, typeid
+  - Правило такое: если вы видите специальный оператор, скорее всего его нельзя перегрузить
+  - Сюда же относятся static_cast и его друзья
+- Тернарный оператор a ? b : c
+
+** Что не следует перегржать
+- Длинные логические операции, теряется сокращенное поведение (Monad Maybe)
+- Запятую, чтобы не потерять sequencing
+- Унарный плюс, чтобы не потерять positive hack
+
+
+** И это еще не все 
+- Фундаментальную роль в языке играют операторы работы с памятью и их перегрузка: operator new, operator delete и т.д.
+- Также по ряду причин на будущее отложено обсуждение оператора "" нужного для пользовательских литералов
+- Начиная с С++20 можно также перегрузить оператор co_await
+
+
+
+
+
+
+
+
+
+

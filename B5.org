@@ -1,0 +1,424 @@
+#+TITLE: Базовый курс C++ (MIPT, ILab). Lecture 5. RAII и перемещение
+#+AUTHOR: idsyr
+#+DESCRIPTION: B1
+#+STARTUP: showeveryhing
+#+OPTIONS: toc:2
+
+
+
+* Владение ресурсом
+- Памятью владеет тот, кто ее выделяет и освобождает
+#+begin_src cpp
+  S *p = new S;
+  foo(p); // foo(S*) {delete p;}
+  delete p;
+#+end_src
+**  Страшное goto
+- official coding style linux kernel: освободить ресурс - goto cleanup
+- goto делает из кода произвольный граф
+- В классическом структурном программировании не было continue, break - goto маскирующих конструкций
+- Дуга в коде не должна пересекать создание обьекта
+- Мы бы хотели не писать goto для того чтобы контролировать освобождение ресурса
+- Для этого мы используем деструкторы
+
+
+
+
+* RAII
+** resource acquisition is initialization
+- Чтобы не писать goto можно спроектировать класс, в котором конструктор захватывает владение, а деструктор освобождает ресурс
+#+begin_src cpp
+  template <typename S> int foo(int n){
+    ScopedPointer<S> p{new S(n)}; // ownership passed
+    // ..... some code .....
+    if(condition) return FAILURE; // dtor called: delete
+    // ..... some code .....
+    return SUCCESS; // dtor called: delete
+  }
+#+end_src
+
+
+
+** RAII обертка
+#+begin_src cpp
+  template <typename T> class ScopedPointer {
+    T *ptr_;
+  public:
+    ScopedPointer(T *ptr = nullptr) : ptr_(ptr) {} // implicit cast to T*
+    ~ScopedPointer() {delete ptr_;}
+  }
+#+end_src
+- Как написать копирование(default отдает владение указателем)/присваивание?
+- Как сделать с ним что то полезное, не дав утечь указателю?
+
+
+** Глубокое копирование
+#+begin_src cpp
+  template <typename T> class ScopedPointer {
+    ScopedPointer(const ScopedPointer& rhs) : ptr_(new T{*rhs.ptr_}){}
+    //  Предположение что T копируемый
+    //  Ни один из умных указателей в стандарте такого предположения не делает
+    //  мы бы хотели управлять также некопируемыми ресурсами
+  }
+#+end_src
+
+
+
+** Доступ у состоянию
+#+begin_src cpp
+  T& access() {return *ptr_;}
+  const T& access() const {return *ptr_;}
+#+end_src
+- Итог многословен
+#+begin_src cpp
+  ScopedPointer<S> p{new S(n)}; 
+  int x = p
+#+end_src
+
+
+* Указателе-подобность
+** Перегрузка разыменования
+- Разыменование указателя это оператор и он перезагружается
+#+begin_src cpp
+  template <typename T> class ScopedPointer {
+    T& operator*() {return *ptr_;}
+    const T& operator*() const {return *ptr_;}
+  }
+#+end_src
+- Уже гораздо лучше, но хотелось бы стрелочку
+#+begin_src cpp
+	int x = (*p).x;
+#+end_src
+- Оператор dref может быть только внутри класса и у него нет аргументов
+
+
+** Проблема со стрелочкой
+- А что собственно возвращать?
+#+begin_src cpp
+  ??? operator->() {return ???; }
+#+end_src
+** Решение: drill down
+#+begin_src cpp
+  T* operator->() {return ptr_;}
+  const T* operator->() const {return ptr_;}
+#+end_src
+- Вызов p->x эквивалентен (p.operator->())->x и так сколько угодно раз
+- Стрелочка зарывается в глубину на столько уровней на сколько может 
+
+
+** Обсуждение
+- Хорош ли получившийся scoped pointer?
+#+begin_src cpp
+  S *a = new S(1), *b = nenw S(2);
+  std::swap(a, b); // Три копирования указателей
+  ScopedPointer<S> x{new S(1)}, y{new S(2)};
+  std::swap(x, y);
+  // copy ctor
+  // assign
+  // assign
+#+end_src
+
+
+
+
+* Семантика перемещения и правые ссылки
+- Взять выражение, связать выражение с именем и в этот момент материализовать обьект выражения - ссылка на rvalue
+#+begin_src cpp
+  int&& y = x + 1;
+  int&& y = std::move(x); // cast lvalue ref -> rvalue ref
+#+end_src
+** Кросс-связывание
+- Правая ссылка не может быть связана с lvalue
+#+begin_src cpp
+  int x = 1;
+  int &&y = x+1; // ok
+  int &&b = x;   // fail, not rvalue
+#+end_src
+- Неконстантная левая ссылка не может быть связана с rvalue
+#+begin_src cpp
+  int &c = x + 1;       // fail, not lvalue
+  const int &d = x + 1; // ok, but its awful
+#+end_src
+- Но при этом правая ссылка сама по себе задает имя и адрес и является lvalue
+#+begin_src cpp
+  int &&e = y; // fail, not rvalue
+  int &f = y;  // ok
+#+end_src
+- Это возможность различать на уровне языковых конструкций обьекты которые нам жалко от обьектов которые нам не жалко
+** Методы над rvalues
+- Всегда надо помнить: метод может быть вызван для rvalue-expression
+#+begin_src cpp
+  struct S {
+    int n = 0;
+    int& access() {return n;}
+  };
+  S x;
+  int& y = x.access();   // ok
+  int& z = S{}.access(); // UB
+#+end_src
+
+
+** Аннотация методов
+- Методы могут быть аннотированы и различать lvalue от rvalue
+#+begin_src cpp
+  struct S {
+    int foo() &;
+    int foo() &&;
+  };
+  extern S bar();
+  S x {};
+  x.foo();      // 1
+  bar().foor(); // 2
+#+end_src
+- Это поможет против висячей ссылки
+#+begin_src cpp
+  class X {
+    vector<char> data_;
+  public:
+    X() = default;
+    vector<char> const & data() const & {return data_;}
+    vector<char> && data() && {return std::move(data_);}
+  };
+  X obj;
+  vector<char> a = obj.data(); // copy
+  vector<char> b = X().data(); // move
+#+end_src
+
+
+** Аккуратнее с возратом правых ссылок
+- Возврат правых ссылок часто ведет себя плохо
+#+begin_src cpp
+  int& foo(int& x) {return x;} // ok
+  const int& bar(const int& x) {return x;} // если приходит временный обьект, на стеке вызванной функции создастся новый обьект
+  int&& buz(int&& x){return std::move(x);} // DANGLE
+#+end_src
+- Обычно вы не хотите их возращать если у вас не &&-аннотированный метод
+- При этом
+#+begin_src cpp
+  int& bat(int&& x) {return x;} // снова когда как
+#+end_src
+- Так что правые ссылки с точки зрения провисания даже опаснее левых
+
+
+* Перемещающие конструкторы и операторы
+- Конструктор берущий rvalue ref не обязан сохранять значение (т.к. это rvalue)
+- Это потрясающе выгодно там, где требуется глубокое копирование
+#+begin_src cpp
+  template <typename T> class ScopedPointer {
+    T *ptr_;
+  public:
+    ScopedPointer(const ScopedPointer& rhs) :
+      ptr_(new T(*rhs.ptr_}){}
+    ScopedPointer(ScopedPointer&& rhs) : ptr_(rhs.ptr_) {
+      rhs.prt_ = nullptr;
+    }
+  };
+#+end_src
+
+
+
+** Перемещающее присваивание
+- Для перемещающего присваивания есть варианты
+#+begin_src cpp
+  ScopedPointer& operator= (ScopedPointer&& rhs){
+    if(this == &rhs) return *this;
+    delete ptr_;
+    ptr_ = rhs.ptr_;
+    rhs.ptr_ = nullptr;
+    return *this;
+  }
+#+end_src
+- Но стирать это прерогатива деструктора
+#+begin_src cpp
+  ScpoedPointer& operator= (ScopedPointer&& rhs) {
+    if(this == &rhs) return *this;
+    std::swap(ptr_, rhs.ptr_);
+    return *this;
+  }
+#+end_src
+- Оно обязано оставить обьект в констистентном, но не обязательно предсказуемом состоянии
+
+
+** Эффективный обмен значениями
+- Старый способ обмена значениями
+#+begin_src cpp
+  template <typename T> void swap (T& x, T& y){
+    T tmp = x; // copy ctor
+    x = y;     // assign
+    y = tmp;   // assign
+  }
+#+end_src
+- Начиная с 2011 года он реализован вот так
+#+begin_src cpp
+  template <typename T> void swap(T& x, T& y) {
+    T tmp = std::move(x);
+    x = std::move(y);
+    y = std::move(tmp);
+  }
+#+end_src
+
+** Аккуратнее с move on result
+- Обычно в таком коде std::move просто не нужен
+#+begin_src cpp
+  T goo(some args){
+    T x = some expr;
+    // more code
+    return std::move(x); // не ошиюка, но зачем
+  }
+#+end_src
+- Функция, возвращающая by value это rvalue expression и таким образом все равно делает move в точке вызова
+- При этом использование std::move может сделать вещи чуть хуже, убив RVO
+- Ограничьте move on result случаями возрата ссылки
+
+
+** Особенности move
+#+begin_src cpp
+  int x = 1;
+  int a = std::move(x);
+  assert(x == a); // Для интов нет оператора перемещения, всегда выполнено
+
+  ScopedPointer y {new int(10)};
+  ScopedPointer b = std::move(y);
+  assert(y == b); // Консистентное, но непредсказуемое состояние, мы не знаем
+#+end_src
+
+
+
+** Проблема implicit move
+- оно побитовое
+
+
+* Правило пяти и правило нуля
+- Классическая идиома проектирования rule of five утверждает, что
+  - "Если ваш класс требует нетривиального определения хотя бы одного из пяти методов:
+    1. Копирующего конструктора
+    2. Копирующего присваивания
+    3. Перемещающего конструктора
+    4. Перемещающего присваивания
+    5. Деструктора
+   то вам лучше бы нетривиально определить все пять"
+ - Но оно противоречит SRP: если класс управляет памятью и делает еще что то, то у него две ответственности
+** Правило нуля
+- Классическая идома проектирования rule of zero утверждает, что:
+#+begin_src text
+    Если ваш класс требует нетрвиального определния хотя бы одного из 5 неявных методов, и, таким образом, все пять, то в нем не должно быть никаких других методов
+#+end_src
+
+
+** Краевой случай: move from const
+- Итак, хорошо организованный move ctor изменяет rhs. Но что если rhs нельзя изменить?
+#+begin_src cpp
+  const ScopedPointer<int> y{new int(10)};
+  ScopedPointer<int> b = std::move(y);
+#+end_src
+- В этом случае move ctor просто не будет вызван, так как его сигнатура предполагает Buffer&& а не Buffer const &&
+- Вместо этого, Buffer const && будет приведен к Buffer const & и вызовется копирующий конструктор, несмотря на явное указание move
+  
+
+
+* Двумерные массивы и домашнее задание
+ - RAM-модель памяти в принципе одномерна, поэтому с двумерными массивами начинаются сложности
+** Row-major vs column-major
+- В математике для матрицы {aij}, первый индекс называется индексом строки, второй - индексом столбца
+- В языке С принят row-major order (язык С читает как книжки)
+- row-major означет, что первым изменяется самый внешний индекс
+- В языке Fortran принят column-major order
+** Почему row-major?
+#+begin_src cpp
+  int a[7][9]; // declaration follows usage
+  int elt = a[2][3]; // why 3rd el of 2nd row?
+#+end_src      
+- Удивительно, но на это есть синтаксические причины
+- Все дело в том, что a[i][j] это неодназначное выражение, которое может быть прочитано по разному, в том числе и как (a[i])[j]
+- Это в свою очередь следует из еще одного способа представления массивов: предствления их как jagged arrays
+** Двумерные массивы
+- Непрерывный массив
+  #+begin_src cpp
+    int cont[10][10];
+    foo(cont);
+    cont[1][2] = 1;
+  #+end_src
+  - Массив указателей
+  #+begin_src cpp
+    int *jagged[10];
+    bar(jagged);
+    jagged[1][2] = 1;
+  #+end_src
+  -  Функция, берущая указатель на массив
+  #+begin_src cpp
+    void foo(int (*pcont)[10]){
+      pcont[1][2] = 1;
+    }
+  #+end_src
+  - Функция, берущая указатель на массив указателей
+  #+begin_src cpp
+    void bar(int ** pjag){
+      pjag[1][2] = 1;
+    }
+  #+end_src
+
+
+** Вычисление адресов
+- Массиво-подобное вычисление
+#+begin_src cpp
+  int first[FX][FY];
+  first[x][y] = 3;  // -> *(&first[0][0] + x * FY + y) = 3
+  int (*second)[SY];
+  second[x][y] = 3; // -> same
+#+end_src
+- Указателе-подобное вычисление
+#+begin_src cpp
+  int *third[SX];
+  third[x][y] = 3; // -> *(*(third + x) + y) = 3;
+  int **fourth;
+  fourth[x][y] = 3; // -> same
+#+end_src
+
+
+
+
+** Обсуждение
+- Мы всегда можем опускать только самый вложенный индекс:
+  - И в инициализаторах
+  - И в аргументах функций
+
+
+
+** Corner case
+- Обычно a[] означает a*, это верно почти всегда
+- Увы, есть один случай, когда это не так: обьявления
+#+begin_src cpp
+  extern int *a; // где то есть настоящая ячейка а
+  extern int b[]; // где то есть массив b какой то длины
+#+end_src
+- И это разумеется не связано с правилами вычисления
+- Это связано с операционной семантикой
+#+begin_src cpp
+  i = a[5]; // aval = load[a];
+            // i = load[aval + 5 * sizeof(int)]
+  i = b[5]; // i = load[b    + 5 * sizeof(int)]
+#+end_src
+
+
+** Case study: представление матрицы
+- jagged vector
+#+begin_src cpp
+  struct matrix {
+    int **data;
+    int x, y;
+  };
+#+end_src
+- Непрерывный массив
+#+begin_src cpp
+  struct matrix {
+    int *data;
+    int x, y;
+  }
+#+end_src
+
+
+
+
+
+
+
