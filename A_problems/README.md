@@ -1,1 +1,0 @@
-http://olymp1.vdi.mipt.ru/

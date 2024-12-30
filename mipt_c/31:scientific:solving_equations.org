@@ -1,4 +1,4 @@
-#+TITLE: Семинар 8.1. Матрицы и линейное программирование 
+#+TITLE: Семинар 8.2. Решение уравнений и вычисление функций
 #+AUTHOR: idsyr
 #+STARTUP: showeverything
 #+OPTIONS: toc:2
