@@ -190,6 +190,187 @@ libc_cv_slibdir=/usr/lib
 #+end_src
 
 
+
+
+
+
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guessw)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(./config.guess) \
+--mandir=/usr/share/man \
+--with-manpage-format=normal \
+--with-shared \
+--without-normal \
+--with-cxx-shared \
+--without-debug \
+--without-ada \
+--disable-stripping
+#+end_src
+
+#+begin_src bash
+make DESTDIR=$LFS TIC_PATH=$(pwd)/build/progs/tic install
+ln -sv libncursesw.so $LFS/usr/lib/libncurses.so
+sed -e 's/^#if.*XOPEN.*$/#if 1/' \
+-i $LFS/usr/include/curses.h
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--build=$(sh support/config.guess) \
+--host=$LFS_TGT \
+--without-bash-malloc \
+bash_cv_strtold_broken=no
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guess) \
+--enable-install-program=hostname \
+--enable-no-install-program=kill,uptime
+#+end_src
+
+#+begin_src bash
+mv -v $LFS/usr/bin/chroot $LFS/usr/sbin
+mkdir -pv $LFS/usr/share/man/man8
+mv -v $LFS/usr/share/man/man1/chroot.1 $LFS/usr/share/man/man8/chroot.8
+sed -i 's/"1"/"8"/' $LFS/usr/share/man/man8/chroot.8
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(./build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+mkdir build
+pushd build
+../configure --disable-bzlib \
+--disable-libseccomp \
+--disable-xzlib \
+--disable-zlib
+make
+popd
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--localstatedir=/var/lib/locate \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(./build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--without-guile \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(./build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guess)
+#+end_src
+
+#+begin_src bash
+./configure --prefix=/usr \
+--host=$LFS_TGT \
+--build=$(build-aux/config.guess) \
+--disable-static \
+--docdir=/usr/share/doc/xz-5.6.2
+#+end_src
+
+#+begin_src bash
+../configure \
+--prefix=/usr \
+--build=$(../config.guess) \
+--host=$LFS_TGT \
+--disable-nls \
+--enable-shared \
+--enable-gprofng=no \
+--disable-werror \
+--enable-64-bit-bfd \
+--enable-new-dtags \
+--enable-default-hash-style=gnu
+#+end_src
+
+#+begin_src bash
+case $(uname -m) in
+x86_64)
+sed -e '/m64=/s/lib64/lib/' \
+-i.orig gcc/config/i386/t-linux64
+;;
+esac
+#+end_src
+
+#+begin_src bash
+../configure \
+--build=$(../config.guess) \
+--host=$LFS_TGT \
+--target=$LFS_TGT \
+LDFLAGS_FOR_TARGET=-L$PWD/$LFS_TGT/libgcc \
+--prefix=/usr \
+--with-build-sysroot=$LFS \
+--enable-default-pie \
+--enable-default-ssp \
+--disable-nls \
+--disable-multilib \
+--disable-libatomic \
+--disable-libgomp \
+--disable-libquadmath \
+--disable-libsanitizer \
+--disable-libssp \
+--disable-libvtv \
+--enable-languages=c,c++ 
+#+end_src
+
+#+begin_src bash
+tar -xf ../mpfr-4.2.1.tar.xz
+mv -v mpfr-4.2.1 mpfr
+tar -xf ../gmp-6.3.0.tar.xz
+mv -v gmp-6.3.0 gmp
+tar -xf ../mpc-1.3.1.tar.gz
+mv -v mpc-1.3.1 mpc
+#+end_src
+
+
+* Chapter 7
+
+
 * USEFUL
 #+begin_src bash
 gcc -dumpmachine
