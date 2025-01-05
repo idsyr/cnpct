@@ -3,17 +3,29 @@
 #+STARTUP: showeverything
 #+OPTIONS: toc:2
 
+
+* Preparing the Host System
 ** Creating a New Partition
 #+begin_src bash
 fdisk /dev/sdb
     g w
     n t w
+# EFI system partition 512M
+# Linux swap           4G
+# Linux x86-64 root    32G
+#+end_src
 
+
+
+** Creating a File System on the Partition
+#+begin_src bash
 mkfs.fat -F32 /dev/sdb1
 mkswap /dev/sdb2
 mkfs -v -t ext4 /dev/sdb3
 lsblk -f
 #+end_src
+
+
 
 ** Setting The $LFS Variable
 #+begin_src bash
@@ -21,62 +33,102 @@ echo "LFS=/mnt/lfs" >> ~/.bashrc
 bash
 #+end_src
 
+
+
 ** Mounting the New Partition
 #+begin_src bash
 mkdir -pv $LFS
 mount -v -t ext4 /dev/sdb3 $LFS
 #+end_src
 
+
+
+
+
+
+
+
 * Packages and Patches
+** Introduction
 #+begin_src bash
 mkdir -v $LFS/sources
-chmod -v a+wt $LFS/sources
-chown root:root $LFS/sources/*
-
-wget ...
+chmod -v a+wt $LFS/sources     # only the owner of a file can delete the file within a sticky directory.
+chown root:root $LFS/sources/* # otherwise files will be left owned by an unnamed UID in the final LFS system
 #+end_src
+
+** All Packages + Needed patches
+#+begin_src bash
+wget <All Packages>
+wget <Needed Patches>
+# wget -i text_file_with_urls.txt
+# wget --input-file=wget-list-sysv --continue --directory-prefix=$LFS/sources
+#+end_src
+
+
+
+
+
+
+
 
 
 * Final Preparations
-** Creating a Limeted Directory Layout in the LFS Filesystem
-#+begin_src emacs-lisp
-
-mkdir -pv $LFS/{etc,var} $LFS/usr/{bin,lib,sbin}
+** Creating a Limited Directory Layout in the LFS Filesystem
+#+begin_src bash
+mkdir -pv $LFS/{etc,var} $LFS/usr/{bin,lib,sbin} # creating dirs
 for i in bin lib sbin; do
-ln -sv usr/$i $LFS/$i
+    ln -sv usr/$i $LFS/$i # symbolic links in $LFS on dirs in usr/
 done
+
 case $(uname -m) in
-x86_64) mkdir -pv $LFS/lib64 ;;
+    x86_64) mkdir -pv $LFS/lib64 ;; # if 64 -> +lib64
 esac
 
-mkdir -pv $LFS/tools
+mkdir -pv $LFS/tools # cross-comiler
 #+end_src
+
+
 
 ** Adding the LFS User
 #+begin_src bash
 groupadd lfs
 useradd -s /bin/bash -g lfs -m -k /dev/null lfs
 #+end_src
+- -s /bin/bash - this makes bash the default for user lfs
+- -g lfs - this creates a home directory for lfs
+- -m - this creates a home directory for lfs
+- -k /dev/null - this parametr prevents possible copting of files from skeleton directory (the defualt is /etc/skel) by chenging input location to the special null device
+- lfs - this is the name of the new user
+
 
 #+begin_src bash
-passwd lfs
+passwd lfs # for switch to lfs from non-root user
 
+# Grant lfs full access to all the directories under $LFS by making lfs the owner:
 chown -v lfs $LFS/{usr{,/*},lib,var,etc,bin,sbin,tools}
 case $(uname -m) in
-x86_64) chown -v lfs $LFS/lib64 ;;
+    x86_64) chown -v lfs $LFS/lib64 ;;
 esac
 
-su - lfs
+su - lfs # Start the shell as a login shell with an environment similar to a real login
 #+end_src
 
+
+
+
 ** Setting Up the Environment
+- while logged as _lfs_
+- The exec env -i.../bin/bash command in the .bash_profile file replaces the running shell with a new one with a completely empty environment, except for the HOME, TERM, and PS1 variables. This ensures that no unwanted and potentially hazardous environment variables from the host system leak into the build environment
 #+beign_src bash
 cat > ~/.bash_profile << "EOF"
 exec env -i HOME=$HOME TERM=$TERM PS1='\u:\w\$ ' /bin/bash
 EOF
+#+end_src
 
+
+#+begin_src bash
 cat > ~/.bashrc << "EOF"
-set +h
+set +h 
 umask 022
 LFS=/mnt/lfs
 LC_ALL=POSIX
@@ -87,8 +139,27 @@ PATH=$LFS/tools/bin:$PATH
 CONFIG_SITE=$LFS/usr/share/config.site
 export LFS LC_ALL LFS_TGT PATH CONFIG_SITE
 EOF
+#+end_src
+- set +h - turns off bash's hash function
+- umask 022 - new files with 644 mode
+- LFS=/mnt/lfs - $LFS
+- LC_ALL=POSIX - controls the localization of certain programs
+- LFS_TGT=$(uname -m)-lfs-linux-gnu - for cross compiler
+- PATH=/usr/bin - std PATH variable
+- if [ ! -L /bin ]; then PATH=/bin:$PATH; fi - if /bin is not a symbolic link, it must be added to the path variable
+- PATH=$LFS/tools/bin:$PATH - by putting ahead of the std path, the cross-compiler is picked up by the shell immediately after its installlation
+- CONFIG_SITE=$LFS/usr/share/config.site - prevent potential contamination from the host
+- export - visible within any sub-shells
 
+#+begin_src bash
 [ ! -e /etc/bash.bashrc ] || mv -v /etc/bash.bashrc /etc/bash.bashrc.NOUSE
+#+end_src
+- disable instantiation of /etc/bash.bashrc to the initialization of bash 
+
+#+begin_src bash
+cat >> ~/.bashrc << "EOF"
+export MAKEFLAGS=-j$(nproc)
+EOF
 #+end_src
 
 
@@ -96,40 +167,79 @@ EOF
 
 
 
-* Part III. Building the LFS Cross Toolchain and Temporary Tools
+
+
+
+
 * Compiling a Cross-Toolchain
 ** Binutils
 - linker, assembler, other tools for handling object files
-** GCC
-*** mptr
-*** gmp
-*** mpc
-** Linux API Headers
-** Glibc
-** libstd++
-
-
 #+begin_src bash
-../configure --prefix=$LFS/tools \
+LFS_TARGET=binutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+mkdir build
+cd build
+
+../configure \
+# install in tools dir
+--prefix=$LFS/tools \
+# look the target system libs in $LFS
 --with-sysroot=$LFS \
+# adjust binutil's build system for building cross linker
 --target=$LFS_TGT \
+# disable internationalization as i18n is not needed for temp tools
 --disable-nls \
+# disable profiler
 --enable-gprofng=no \
+# prevent the build from stopping on warnings
 --disable-werror \
+# runpath instead of rpath
 --enable-new-dtags \
+# only one hash table for shared libs
 --enable-default-hash-style=gnu
+
+make
+make install
+
+cd ..
+cd ..
 #+end_src
 
-
-
-
+** GCC
+*** mpfr
 #+begin_src bash
+tar -xf mpfr*tar*
+mv mpfr*/ mpfr/
+#+end_src
+*** gmp
+#+begin_src bash
+tar -xf gmp*tar*
+mv gmp*/ gmp/
+#+end_src
+*** mpc
+#+begin_src bash
+tar -xf mpc*tar*
+mv mpc*/ mpc/
+#+end_src
+*** GCC
+#+begin_src bash
+LFS_TARGET=gcc
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+
+# set default directory name for 64-bit libs to "lib"
 case $(uname -m) in
-x86_64)
-sed -e '/m64=/s/lib64/lib/' \
--i.orig gcc/config/i386/t-linux64
-;;
+    x86_64)
+        sed -e '/m64=/s/lib64/lib/' \
+            -i.orig gcc/config/i386/t-linux64
+    ;;
 esac
+
+mkdir build
+cd build
 
 ../configure \
 --target=$LFS_TGT \
@@ -152,22 +262,59 @@ esac
 --disable-libstdcxx \
 --enable-languages=c,c++
 
+make 
+make install
+
 cd ..
 cat gcc/limitx.h gcc/glimits.h gcc/limity.h > \
 `dirname $($LFS_TGT-gcc -print-libgcc-file-name)`/include/limits.h
 
-case $(uname -m) in
-i?86)
- ln -sfv ld-linux.so.2 $LFS/lib/ld-lsb.so.3
-;;
-x86_64) ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64
-ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64/ld-lsb-x86-64.so.3
-;;
-esac
+
+cd ..
 #+end_src
 
 
+
+** Linux API Headers
 #+begin_src bash
+LFS_TARGET=linux
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+
+make mrproper
+
+make headers
+find usr/include -type f ! -name '*.h' -delete
+cp -rv usr/include $LFS/usr
+
+cd ..
+#+end_src
+
+
+
+** Glibc
+#+begin_src bash
+LFS_TARGET=glibc
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+
+case $(uname -m) in
+    i?86)
+        ln -sfv ld-linux.so.2 $LFS/lib/ld-lsb.so.3
+    ;;
+    x86_64) 
+        ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64
+        ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64/ld-lsb-x86-64.so.3
+    ;;
+esac
+
+mkdir build
+cd build
+
+echo "rootsbindir=/usr/sbin" > configparms
+
 ../configure \
 --prefix=/usr \
 --host=$LFS_TGT \
@@ -176,33 +323,83 @@ esac
 --with-headers=$LFS/usr/include \
 --disable-nscd \
 libc_cv_slibdir=/usr/lib
+
+make
+make DESTDIR=$LFS install
+
+sed '/RTLDLIST=/s@/usr@@g' -i $LFS/usr/bin/ldd
+
+cd ..
+cd ..
 #+end_src
 
+
+
+** libstd++
 #+begin_src bash
-../libstdc++-v3/configure \
---host=$LFS_TGT \
---build=$(../config.guess) \
---prefix=/usr \
---disable-multilib \
+LFS_TARGET=libstd++
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+mkdir build
+cd build
+
+../configure \
+--prefix=$LFS/tools \
+--with-sysroot=$LFS \
+--target=$LFS_TGT \
 --disable-nls \
---disable-libstdcxx-pch \
---with-gxx-include-dir=/tools/$LFS_TGT/include/c++/14.2.0
+--enable-gprofng=no \
+--disable-werror \
+--enable-new-dtags \
+--enable-default-hash-style=gnu
+
+make
+make DESTDIR=$LFS isntall
+rm -v $LFS/usr/lib/lib{stdc++{,exp,fs},supc++}.la
+
+cd ..
+cd ..
 #+end_src
 
 
 
 
-
-
-
+* Cross Compiling Temporary Tools
+** M4
 #+begin_src bash
-./configure --prefix=/usr \
+LFS_TARGET=m4
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+
+./configure \
+--prefix=/usr \
 --host=$LFS_TGT \
---build=$(build-aux/config.guessw)
+--build=$(build-aux/config.guess)
+
+make
+make DESTDIR=$LFS install
+
+cd ..
 #+end_src
 
+** Ncurses
 #+begin_src bash
-./configure --prefix=/usr \
+LFS_TARGET=ncurses
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+
+mkdir build
+pushd build
+    ../configure
+    make -C include
+    make -C progs tic
+popd
+
+./configure \
+--prefix=/usr \
 --host=$LFS_TGT \
 --build=$(./config.guess) \
 --mandir=/usr/share/man \
@@ -213,159 +410,156 @@ libc_cv_slibdir=/usr/lib
 --without-debug \
 --without-ada \
 --disable-stripping
-#+end_src
 
-#+begin_src bash
+make
 make DESTDIR=$LFS TIC_PATH=$(pwd)/build/progs/tic install
 ln -sv libncursesw.so $LFS/usr/lib/libncurses.so
 sed -e 's/^#if.*XOPEN.*$/#if 1/' \
--i $LFS/usr/include/curses.h
+    -i $LFS/usr/include/curses.h
+
+cd ..
 #+end_src
 
+
+
+** Bash
 #+begin_src bash
-./configure --prefix=/usr \
+LFS_TARGET=bash
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
 --build=$(sh support/config.guess) \
 --host=$LFS_TGT \
 --without-bash-malloc \
 bash_cv_strtold_broken=no
+
+make
+make DESTDIR=$LFS install
+ln -sv bash $LFS/bin/sh
+
+cd ..
 #+end_src
 
+
+
+** Coreutils
 #+begin_src bash
-./configure --prefix=/usr \
+LFS_TARGET=coreutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
 --host=$LFS_TGT \
 --build=$(build-aux/config.guess) \
 --enable-install-program=hostname \
 --enable-no-install-program=kill,uptime
-#+end_src
 
-#+begin_src bash
+make
+make DESTDIR=$LFS install
+
 mv -v $LFS/usr/bin/chroot $LFS/usr/sbin
 mkdir -pv $LFS/usr/share/man/man8
 mv -v $LFS/usr/share/man/man1/chroot.1 $LFS/usr/share/man/man8/chroot.8
 sed -i 's/"1"/"8"/' $LFS/usr/share/man/man8/chroot.8
+
+cd ..
 #+end_src
 
+
+
+** Diffutils
 #+begin_src bash
-./configure --prefix=/usr \
+LFS_TARGET=diffutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
 --host=$LFS_TGT \
 --build=$(./build-aux/config.guess)
+
+make
+make DESTDIR=$LFS install
+
+cd ..
 #+end_src
 
+
+
+** file
 #+begin_src bash
+LFS_TARGET=file
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
 mkdir build
 pushd build
-../configure --disable-bzlib \
---disable-libseccomp \
---disable-xzlib \
---disable-zlib
-make
+    ../configure \
+    --disable-bzlib \
+    --disable-libseccomp \
+    --disable-xzlib \
+    --disable-zlib
+    make
 popd
+
+./configure --prefix=/usr --host=$LFS_TGT --build=$(./config.guess)
+
+make FILE_COMPILE=$(pwd)/build/src/file
+make DESTDIR=$LFS install
+rm -v $LFS/usr/lib/libmagic.la
+
+cd ..
 #+end_src
 
+
+
+** findutils
 #+begin_src bash
-./configure --prefix=/usr \
+LFS_TARGET=findutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
 --localstatedir=/var/lib/locate \
 --host=$LFS_TGT \
 --build=$(build-aux/config.guess)
+
+make
+make DESTDIR=$LFS install
+
+cd ..
 #+end_src
 
-#+begin_src bash
-./configure --prefix=/usr \
---host=$LFS_TGT \
---build=$(build-aux/config.guess)
-#+end_src
 
-#+begin_src bash
-./configure --prefix=/usr \
---host=$LFS_TGT \
---build=$(./build-aux/config.guess)
-#+end_src
 
+** gawk
 #+begin_src bash
-./configure --prefix=/usr \
---without-guile \
---host=$LFS_TGT \
---build=$(build-aux/config.guess)
-#+end_src
+LFS_TARGET=gawk
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
 
-#+begin_src bash
-./configure --prefix=/usr \
---host=$LFS_TGT \
---build=$(build-aux/config.guess)
-#+end_src
+sed -i 's/extras//' Makefile.in
 
-#+begin_src bash
-./configure --prefix=/usr \
---host=$LFS_TGT \
---build=$(./build-aux/config.guess)
-#+end_src
-
-#+begin_src bash
-./configure --prefix=/usr \
---host=$LFS_TGT \
---build=$(build-aux/config.guess)
-#+end_src
-
-#+begin_src bash
-./configure --prefix=/usr \
---host=$LFS_TGT \
---build=$(build-aux/config.guess) \
---disable-static \
---docdir=/usr/share/doc/xz-5.6.2
-#+end_src
-
-#+begin_src bash
-../configure \
+./configure \
 --prefix=/usr \
---build=$(../config.guess) \
 --host=$LFS_TGT \
---disable-nls \
---enable-shared \
---enable-gprofng=no \
---disable-werror \
---enable-64-bit-bfd \
---enable-new-dtags \
---enable-default-hash-style=gnu
+--build=$(build-aux/config.guess)
+
+make
+make DESTDIR=$LFS install
+
+cd ..
 #+end_src
 
-#+begin_src bash
-case $(uname -m) in
-x86_64)
-sed -e '/m64=/s/lib64/lib/' \
--i.orig gcc/config/i386/t-linux64
-;;
-esac
-#+end_src
 
-#+begin_src bash
-../configure \
---build=$(../config.guess) \
---host=$LFS_TGT \
---target=$LFS_TGT \
-LDFLAGS_FOR_TARGET=-L$PWD/$LFS_TGT/libgcc \
---prefix=/usr \
---with-build-sysroot=$LFS \
---enable-default-pie \
---enable-default-ssp \
---disable-nls \
---disable-multilib \
---disable-libatomic \
---disable-libgomp \
---disable-libquadmath \
---disable-libsanitizer \
---disable-libssp \
---disable-libvtv \
---enable-languages=c,c++ 
-#+end_src
 
-#+begin_src bash
-tar -xf ../mpfr-4.2.1.tar.xz
-mv -v mpfr-4.2.1 mpfr
-tar -xf ../gmp-6.3.0.tar.xz
-mv -v gmp-6.3.0 gmp
-tar -xf ../mpc-1.3.1.tar.gz
-mv -v mpc-1.3.1 mpc
-#+end_src
+
+
+
 
 
 * Chapter 7
