@@ -2952,6 +2952,389 @@ make install
 cd ..
 #+end_src
 
+** stripping skiped FIXME
+
+
+* System Configuration
+** lfs-bootscripts 
+#+begin_src bash
+LFS_TARGET=lfs-bootscripts
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+make install
+
+cd ..
+#+end_src
+
+
+** Creating Custom Udev Rules
+#+begin_src bash
+bash /usr/lib/udev/init-net-rules.sh
+cat /etc/udev/rules.d/70-persistent-net.rules
+
+#sed -e '/^AlternativeNamesPolicy/s/=.*$/=/' \
+#/usr/lib/udev/network/99-default.link \
+#> /etc/udev/network/99-default.link
+#+end_src
+
+
+** CD_ROM Symlinks
+#+begin_src bash
+udevadm test /sys/block/hdd
+
+#sed -e 's/"write_cd_rules"/"write_cd_rules mode"/' \
+#    -i /etc/udev/rules.d/83-cdrom-symlinks.rules
+#+end_src
+
+** Duplicate devices
+
+
+* Network Configuration
+** Creating Network Interaface configuration files
+#+begin_src bash
+cd /etc/sysconfig/
+cat > ifconfig.eth0 << "EOF"
+ONBOOT=yes
+IFACE=eth0
+SERVICE=ipv4-static
+IP=192.168.1.2
+GATEWAY=192.168.1.1
+PREFIX=24
+BROADCAST=192.168.1.255
+EOF
+#+end_src
+
+** Creating the /etc/resolv.conf
+#+begin_src bash
+cat > /etc/resolv.conf << "EOF"
+# Begin /etc/resolv.conf
+domain <Your Domain Name>
+nameserver <IP address of your primary nameserver>
+nameserver <IP address of your secondary nameserver>
+# End /etc/resolv.conf
+EOF
+#+end_src
+
+** configuring the system hostname
+#+begin_src bash
+echo "<lfs>" > /etc/hostname
+#+end_src
+
+
+** Customizing the /etc/hosts
+#+begin_src bash
+cat > /etc/hosts << "EOF"
+# Begin /etc/hosts
+127.0.0.1 localhost.localdomain localhost
+127.0.1.1 <FQDN> <HOSTNAME>
+<192.168.1.1> <FQDN> <HOSTNAME> [alias1] [alias2 ...]
+::1
+ localhost ip6-localhost ip6-loopback
+ff02::1
+ ip6-allnodes
+ff02::2
+ ip6-allrouters
+# End /etc/hosts
+EOF
+#+end_src
+
+
+
+* System V Bootscrpit Usage and Configuration
+** Configuring SysVinit
+#+begin_src bash
+cat > /etc/inittab << "EOF"
+# Begin /etc/inittab
+id:3:initdefault:
+si::sysinit:/etc/rc.d/init.d/rc S
+l0:0:wait:/etc/rc.d/init.d/rc 0
+l1:S1:wait:/etc/rc.d/init.d/rc 1
+l2:2:wait:/etc/rc.d/init.d/rc 2
+l3:3:wait:/etc/rc.d/init.d/rc 3
+l4:4:wait:/etc/rc.d/init.d/rc 4
+l5:5:wait:/etc/rc.d/init.d/rc 5
+l6:6:wait:/etc/rc.d/init.d/rc 6
+ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now
+su:S06:once:/sbin/sulogin
+s1:1:respawn:/sbin/sulogin
+1:2345:respawn:/sbin/agetty --noclear tty1 9600
+2:2345:respawn:/sbin/agetty tty2 9600
+3:2345:respawn:/sbin/agetty tty3 9600
+4:2345:respawn:/sbin/agetty tty4 9600
+5:2345:respawn:/sbin/agetty tty5 9600
+6:2345:respawn:/sbin/agetty tty6 9600
+# End /etc/inittab
+EOF
+#+end_src
+
+
+** Configuring the System Clock
+#+begin_src bash
+cat > /etc/sysconfig/clock << "EOF"
+# Begin /etc/sysconfig/clock
+UTC=1
+# Set this to any options you might need to give to hwclock,
+# such as machine hardware clock type for Alphas.
+CLOCKPARAMS=
+# End /etc/sysconfig/clock
+EOF
+#+end_src
+
+
+** Linux Console
+#+begin_src bash
+cat > /etc/sysconfig/console << "EOF"
+# Begin /etc/sysconfig/console
+UNICODE="1"
+FONT="Lat2-Terminus16"
+# End /etc/sysconfig/console
+EOF
+#+end_src
+
+
+** rc.site 
+#+begin_src bash
+# rc.site
+# Optional parameters for boot scripts.
+# Distro Information
+# These values, if specified here, override the defaults
+#DISTRO="Linux From Scratch" # The distro name
+#DISTRO_CONTACT="lfs-dev@lists.linuxfromscratch.org" # Bug report address
+#DISTRO_MINI="LFS" # Short name used in filenames for distro config
+# Define custom colors used in messages printed to the screen
+# Please consult `man console_codes` for more information
+# under the "ECMA-48 Set Graphics Rendition" section
+#
+254
+Linux From Scratch - Version 12.2
+# Warning: when switching from a 8bit to a 9bit font,
+# the linux console will reinterpret the bold (1;) to
+# the top 256 glyphs of the 9bit font. This does
+# not affect framebuffer consoles
+# These values, if specified here, override the defaults
+#BRACKET="\\033[1;34m" # Blue
+#FAILURE="\\033[1;31m" # Red
+#INFO="\\033[1;36m"
+ # Cyan
+#NORMAL="\\033[0;39m" # Grey
+#SUCCESS="\\033[1;32m" # Green
+#WARNING="\\033[1;33m" # Yellow
+# Use a colored prefix
+# These values, if specified here, override the defaults
+#BMPREFIX="
+ "
+#SUCCESS_PREFIX="${SUCCESS} * ${NORMAL} "
+#FAILURE_PREFIX="${FAILURE}*****${NORMAL} "
+#WARNING_PREFIX="${WARNING} *** ${NORMAL} "
+# Manually set the right edge of message output (characters)
+# Useful when resetting console font during boot to override
+# automatic screen width detection
+#COLUMNS=120
+# Interactive startup
+#IPROMPT="yes" # Whether to display the interactive boot prompt
+#itime="3"
+ # The amount of time (in seconds) to display the prompt
+# The total length of the distro welcome string, without escape codes
+#wlen=$(echo "Welcome to ${DISTRO}" | wc -c )
+#welcome_message="Welcome to ${INFO}${DISTRO}${NORMAL}"
+# The total length of the interactive string, without escape codes
+#ilen=$(echo "Press 'I' to enter interactive startup" | wc -c )
+#i_message="Press '${FAILURE}I${NORMAL}' to enter interactive startup"
+# Set scripts to skip the file system check on reboot
+#FASTBOOT=yes
+# Skip reading from the console
+#HEADLESS=yes
+# Write out fsck progress if yes
+#VERBOSE_FSCK=no
+# Speed up boot without waiting for settle in udev
+#OMIT_UDEV_SETTLE=y
+# Speed up boot without waiting for settle in udev_retry
+#OMIT_UDEV_RETRY_SETTLE=yes
+# Skip cleaning /tmp if yes
+#SKIPTMPCLEAN=no
+# For setclock
+#UTC=1
+#CLOCKPARAMS=
+# For consolelog (Note that the default, 7=debug, is noisy)
+#LOGLEVEL=7
+# For network
+255
+#HOSTNAME=mylfs
+# Delay between TERM and KILL signals at shutdown
+#KILLDELAY=3
+# Optional sysklogd parameters
+#SYSKLOGD_PARMS="-m 0"
+# Console parameters
+#UNICODE=1
+#KEYMAP="de-latin1"
+#KEYMAP_CORRECTIONS="euro2"
+#FONT="lat0-16 -m 8859-15"
+#LEGACY_CHARSET=
+#+end_src
+
+** System locale
+#+begin_src bash
+LFS_LOCALE_NAME=en_US.utf8
+LC_ALL=$LFS_LOCALE_NAME locale language
+LC_ALL=$LFS_LOCALE_NAME locale charmap
+LC_ALL=$LFS_LOCALE_NAME locale int_curr_symbol
+LC_ALL=$LFS_LOCALE_NAME locale int_prefix
+
+cat > /etc/profile << "EOF"
+# Begin /etc/profile
+for i in $(locale); do
+unset ${i%=*}
+done
+if [[ "$TERM" = linux ]]; then
+export LANG=C.UTF-8
+else
+export LANG=<ll>_<CC>.<charmap><@modifiers>
+fi
+# End /etc/profile
+EOF
+#+end_src
+
+
+** /etc/inputrc
+#+begin_src bash
+cat > /etc/inputrc << "EOF"
+# Begin /etc/inputrc
+# Modified by Chris Lynn <roryo@roryo.dynup.net>
+# Allow the command prompt to wrap to the next line
+set horizontal-scroll-mode Off
+# Enable 8-bit input
+set meta-flag On
+set input-meta On
+# Turns off 8th bit stripping
+set convert-meta Off
+# Keep the 8th bit for display
+set output-meta On
+# none, visible or audible
+set bell-style none
+# All of the following map the escape sequence of the value
+# contained in the 1st argument to the readline specific functions
+"\eOd": backward-word
+"\eOc": forward-word
+# for linux console
+"\e[1~": beginning-of-line
+"\e[4~": end-of-line
+"\e[5~": beginning-of-history
+"\e[6~": end-of-history
+"\e[3~": delete-char
+"\e[2~": quoted-insert
+# for xterm
+"\eOH": beginning-of-line
+"\eOF": end-of-line
+# for Konsole
+"\e[H": beginning-of-line
+"\e[F": end-of-line
+# End /etc/inputrc
+EOF
+#+end_src
+
+
+** /etc/shells
+#+begin_src shell
+cat > /etc/shells << "EOF"
+# Begin /etc/shells
+/bin/sh
+/bin/bash
+# End /etc/shells
+EOF
+#+end_src
+
+
+* Making the LFS System Bootable
+** Creating the /etc/fstab file
+- FIXME boot
+#+begin_src bash
+cat > /etc/fstab << "EOF"
+# Begin /etc/fstab
+# file system   mount-point     type        options               dump    fsck order
+/dev/<xxx>      /               <fff>       defaults              1       1
+/dev/<yyy>      swap            swap        pri=1                 0       0
+proc            /proc           proc        nosuid,noexec,nodev   0       0
+sysfs           /sys            sysfs       nosuid,noexec,nodev   0       0
+devpts          /dev/pts        devpts      gid=5,mode=620        0       0
+tmpfs           /run            tmpfs       defaults              0       0
+devtmpfs        /dev            devtmpfs    mode=0755,nosuid      0       0
+tmpfs           /dev/shm        tmpfs       nosuid,nodev          0       0
+cgroup2         /sys/fs/cgroup  cgroup2     nosuid,noexec,nodev   0       0
+# End /etc/fstab
+EOF
+#+end_src
+
+
+** linux 
+#+begin_src bash
+LFS_TARGET=linux
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+make mrproper
+make menuconfig
+
+make
+make modules_install
+
+mount /boot
+
+cp -iv arch/x86/boot/bzImage /boot/vmlinuz-6.10.5-lfs-12.2
+cp -iv System.map /boot/System.map-6.10.5
+cp -iv .config /boot/config-6.10.5
+cp -r Documentation -T /usr/share/doc/linux-6.10.5
+
+cd ..
+#+end_src
+
+
+** Configuring Linux Module load order
+- /etc/modprobe.d/usb.conf
+#+begin_src bash
+install -v -m755 -d /etc/modprobe.d
+cat > /etc/modprobe.d/usb.conf << "EOF"
+# Begin /etc/modprobe.d/usb.conf
+install ohci_hcd /sbin/modprobe ehci_hcd ; /sbin/modprobe -i ohci_hcd ; true
+install uhci_hcd /sbin/modprobe ehci_hcd ; /sbin/modprobe -i uhci_hcd ; true
+# End /etc/modprobe.d/usb.conf
+EOF
+#+end_src
+
+
+** GRUB
+TODO:
+- mount boot(/dev/sdaX) as smth but not boot/
+- move /boot/grub to smth
+- move vmlinuz-linux to smth
+- remount smth as boot/
+
+#+begin_src bash
+grub-install /dev/sdb --target i386-pc
+#+end_src
+
+#+begin_src bash
+cat > /boot/grub/grub.cfg << "EOF"
+# Begin /boot/grub/grub.cfg
+set default=0
+set timeout=5
+
+insmod part_gpt
+insmod ext2
+set root=(hd0,2)
+
+menuentry "GNU/Linux, Linux 6.10.5-lfs-12.2" {
+    linux /boot/vmlinuz-6.10.5-lfs-12.2 root=/dev/sda2 ro
+}
+EOF
+#+end_src
+
+
+
+
+
+
+
 
 
 
@@ -2959,7 +3342,21 @@ cd ..
 
 * USEFUL
 #+begin_src bash
+ip link
+ls /sys/class/net
+ 
 tzselect
 gcc -dumpmachine
 readelf -l <name of binary> | grep interpreter
 #+end_src
+
+** 
+#+begin_src bash
+LFS_TARGET=
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+cd ..
+#+end_src
+
+
