@@ -1838,8 +1838,848 @@ sed -e 's/^#if.*XOPEN.*$/#if 1/' \
     -i dest/usr/include/curses.h
 cp -av dest/* /
 
+for lib in ncurses form panel menu ; do
+    ln -sfv lib${lib}w.so /usr/lib/lib${lib}.so
+    ln -sfv ${lib}w.pc /usr/lib/pkgconfig/${lib}.pc
+done
+
+ln -sfv libncursesw.so /usr/lib/libcurses.so
+cp -v -R doc -T /usr/share/doc/ncurses-6.5
+
 cd ..
 #+end_src
+
+** sed
+#+begin_src bash
+LFS_TARGET=sed
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+cp -v -R doc -T /usr/share/doc/ncurses-6.5
+make
+make html
+
+chown -R tester .
+su tester -c "PATH=$PATH make check"
+
+make install
+install -d -m755 /usr/share/doc/sed-4.9
+install -m644 doc/sed.html /usr/share/doc/sed-4.9
+
+cd ..
+#+end_src
+
+** psmisc
+#+begin_src bash
+LFS_TARGET=psmisc
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+** gettext
+#+begin_src bash
+LFS_TARGET=gettext
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
+--disable-static \
+--docdir=/usr/share/doc/gettext-0.22.5
+
+make
+make check
+make install
+chmod -v 0755 /usr/preloadable_libntl.so
+
+cd ..
+#+end_src
+
+** bison
+#+begin_src bash
+LFS_TARGET=bison
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr --docdir=/usr/share/doc/bison-3.8.2
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+** grep
+#+begin_src bash
+LFS_TARGET=grep
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+sed -i "s/echo/#echo/" src/egrep.sh
+./configure --prefix=/usr
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+** bash
+#+begin_src bash
+LFS_TARGET=bash
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
+--without-bash-malloc \
+--with-installed-readline \
+bash_cv_strtold_broken=no \
+--docdir=/usr/share/doc/bash-5.2.32
+
+make
+chown -R tester .
+
+su -s /usr/bin/expect tester << "EOF"
+set timeout -1
+spawn make tests
+expect eof
+lassign [wait] _ _ _ value
+exit $value
+EOF
+
+make install
+
+exec /usr/bin/bash --login
+
+cd ..
+#+end_src
+
+** libtool
+#+begin_src bash
+LFS_TARGET=libtool
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+make -k check
+make install
+rm -fv /usr/lib/libltdl.a
+
+cd ..
+#+end_src
+
+** gdbm
+#+begin_src bash
+LFS_TARGET=gdbm
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
+--disable-static \
+--enable-libgdbm-compat
+
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+
+** gperf
+#+begin_src bash
+LFS_TARGET=gperf
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr --docdir=/usr/share/doc/gperf-3.1
+make
+make -j1 check
+make install
+
+cd ..
+#+end_src
+
+
+
+** expat
+#+begin_src bash
+LFS_TARGET=expat
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
+--disable-static \
+--docdir=/usr/share/doc/expat-2.6.2
+
+make
+make check
+make install
+
+#FIXME
+install -v -m644 doc/*.{html,css} /usr/share/doc/expat-2.6.2
+
+cd ..
+#+end_src
+
+
+
+** inetutils
+#+begin_src bash
+LFS_TARGET=inetutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+sed -i 's/def HAVE_TERMCAP_TGETENT/ 1/' telnet/telnet.c
+
+./configure \
+--prefix=/usr \
+--bindir=/usr/bin \
+--localstatedir=/var \
+--disable-logger \
+--disable-whois \
+--disable-rcp \
+--disable-rexec \
+--disable-rlogin \
+--disable-rsh \
+--disable-servers
+
+make
+make check
+make install
+mk -v /usr/{,s}bin/ifconfig
+
+cd ..
+#+end_src
+
+
+
+** less
+#+begin_src bash
+LFS_TARGET=less
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr --sysconfdir=/etc
+make 
+make check
+make install
+
+cd ..
+#+end_src
+
+
+
+** perl
+#+begin_src bash
+LFS_TARGET=perl
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+export BUILD_ZLIB=False
+export BUILD_BZIP2=0
+
+sh Configure -des \
+-D prefix=/usr \
+-D vendorprefix=/usr \
+-D privlib=/usr/lib/perl5/5.40/core_perl \
+-D archlib=/usr/lib/perl5/5.40/core_perl \
+-D sitelib=/usr/lib/perl5/5.40/site_perl \
+-D sitearch=/usr/lib/perl5/5.40/site_perl \
+-D vendorlib=/usr/lib/perl5/5.40/vendor_perl \
+-D vendorarch=/usr/lib/perl5/5.40/vendor_perl \
+-D man1dir=/usr/share/man/man1 \
+-D man3dir=/usr/share/man/man3 \
+-D pager="/usr/bin/less -isR" \
+-D useshrplib \
+-D usethreads
+
+make
+TEST_JOBS=$(nproc) make test_harness
+
+make install
+unset BUILD_ZLIB BUILD_BZIP2
+
+cd ..
+#+end_src
+
+
+
+** xml::parser
+#+begin_src bash
+LFS_TARGET=XML-Parser
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+perl Makefile.PL
+make
+make test
+make install
+
+cd ..
+#+end_src
+
+
+
+** intltool
+#+begin_src bash
+LFS_TARGET=intltool
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+sed -i 's:\\\${:\\\$\\{:' intltool-update.in
+./configure --prefix=/usr
+make
+make check
+make install
+install -v -Dm644 doc/I18N-HOWTO /usr/share/doc/intltool-0.51.0/I18N-HOWTO
+
+cd ..
+#+end_src
+
+
+
+** autoconf
+#+begin_src bash
+LFS_TARGET=autoconf
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+
+** automake
+#+begin_src bash
+LFS_TARGET=automake
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+#FIXME
+./configure --prefix=/usr --docdir=/usr/share/doc/automake-1.17
+make
+make -j$(($(nproc)>4?$(nproc):4)) check
+make install
+
+cd ..
+#+end_src
+
+
+
+** openssl
+#+begin_src bash
+LFS_TARGET=openssl
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./config \
+--prefix=/usr \
+--openssldir=/etc/ssl \
+--libdir=lib \
+shared \
+zlib-dynamic
+
+make
+HARNESS_JOBS=$(nproc) make test
+
+sed -i '/INSTALL_LIBS/s/libcrypto.a libssl.a//' Makefile
+make MANSUFFIX=ssl install
+
+mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
+
+#FIXME
+cp -vfr doc/* /usr/share/doc/openssl-3.3.1
+
+cd ..
+#+end_src
+
+
+
+** kmod
+#+begin_src bash
+LFS_TARGET=kmod
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
+--sysconfdir=/etc \
+--with-openssl \
+--with-xz \
+--with-zstd \
+--with-zlib \
+--disable-manpages
+
+make
+make install
+for target in depmod insmod modinfo modprobe rmmod; do
+    ln -sfv ../bin/kmod /usr/sbin/$target
+    rm -fv /usr/bin/$target
+done
+
+cd ..
+#+end_src
+
+
+
+** libelf 
+#+begin_src bash
+LFS_TARGET=elfutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+cd libelf/
+
+./configure --prefix=/usr \
+--disable-debuginfod \
+--enable-libdebuginfod=dummy
+
+make
+make check
+
+make -C libelf install
+install -vm644 config/libelf.pc /usr/lib/pkgconfig
+rm /usr/lib/libelf.a
+
+cd ../../
+#+end_src
+
+
+
+** libffi 
+#+begin_src bash
+LFS_TARGET=libffi
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
+--disable-static \
+--with-gcc-arch=native
+
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+
+** python
+#+begin_src bash
+LFS_TARGET=python
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure \
+--prefix=/usr \
+--enable-shared \
+--with-system-expat \
+--enable-optimizations
+
+make
+make test TESTOPTS="--timeout 120"
+make install
+
+# FIXME
+install -v -dm755 /usr/share/doc/python-3.12.5/html
+tar --no-same-owner \
+    -xvf ../python-3.12.5-docs-html.tar.bz2
+cp -R --no-preserve=mode python-3.12.5-docs-html/* \
+    /usr/share/doc/python-3.12.5/html
+
+cd ..
+#+end_src
+
+
+
+** flit_core
+#+begin_src bash
+LFS_TARGET=flit_core
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+pip3 wheel -w dist --no-cache-dir --no-build-isolation --no-deps $PWD
+pip3 install --no-index --find-links=dist wheel
+
+cd ..
+#+end_src
+
+
+
+** setuptools
+#+begin_src bash
+LFS_TARGET=setuptools
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+pip3 wheel -w dist --no-cache-dir --no-build-isolation --no-deps $PWD
+pip3 install --no-index --find-links dist setuptools
+
+cd ..
+#+end_src
+
+
+** ninja
+#+begin_src bash
+LFS_TARGET=ninja
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+export NINJAJOBS=4
+
+sed -i '/int Guess/a \
+    int j = 0;\
+    char* jobs = getenv( "NINJAJOBS" );\
+    if ( jobs != NULL ) j = atoi( jobs );\
+    if ( j > 0 ) return j;\
+' src/ninja.cc
+
+python3 configure.py --bootstrap
+
+install -vm755 ninja /usr/bin/
+install -vDm644 misc/bash-completion /usr/share/bash-completion/completions/ninja
+install -vDm644 misc/zsh-completion /usr/share/zsh/site-functions/_ninja
+
+cd ..
+#+end_src
+
+
+
+** meson
+#+begin_src bash
+LFS_TARGET=meson
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+pip3 wheel -w dist --no-cache-dir --no-build-isolation --no-deps $PWD
+
+pip3 install --no-index --find-links dist meson
+install -vDm644 data/shell-completions/bash/meson /usr/share/bash-completion/completions/meson
+install -vDm644 data/shell-completions/zsh/_meson /usr/share/zsh/site-functions/_meson
+
+cd ..
+#+end_src
+
+
+
+** coreutils
+#+begin_src bash
+LFS_TARGET=coreutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+patch -Np1 -i ../coreutils-9.5-i18n-2.patch
+
+autoreconf -fiv
+FORCE_UNSAFE_CONFIGURE=1 ./configure \
+--prefix=/usr \
+--enable-no-install-program=kill,uptime
+
+make
+make NON_ROOT_USERNAME=tester check-root
+groupadd -g 102 dummy -U tester
+chown -R tester .
+
+su tester -c "PATH make -k RUN_EXPENSIVE_TESTS=yes check" \
+    < /dev/null
+
+groupdel dummy
+make install
+
+mv -v /usr/bin/chroot /usr/sbin
+mv -v /usr/share/man/man1/chroot.1 /usr/share/man/man8/chroot.8
+sed -i 's/"1"/"8"/' /usr/share/man/man8/chroot.8
+
+cd ..
+#+end_src
+
+
+
+** check
+#+begin_src bash
+LFS_TARGET=check
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+../configure --prefix=/usr --disable-static
+make
+make check
+make docdir=/usr/share/doc/check-0.15.2 install
+
+cd ..
+#+end_src
+
+
+** diffutils
+#+begin_src bash
+LFS_TARGET=diffutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+** gawk
+#+begin_src bash
+LFS_TARGET=gawk
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+sed -i 's/extras//' Makefile.in
+./configure --prefix=/usr
+make
+
+chown -R tester .
+su tester -c "PATH=$PATH make check"
+
+rm -f /usr/bin/gawk-5.3.0
+make install
+
+ln -sv gawk.1 /usr/share/man/man1/awk.1
+
+#FIXME
+mkdir -pv /usr/share/doc/gawk-5.3.0
+cp -v doc/{awkforai.txt,*.{eps,pdf,jpg}} /usr/share/doc/gawk-5.3.0
+
+cd ..
+#+end_src
+
+
+** findutils
+#+begin_src bash
+LFS_TARGET=findutils
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr --localstatedir=/var/lib/locate
+make
+
+chown -R tester .
+su tester -c "PATH=$PATH make check"
+
+make install
+
+cd ..
+#+end_src
+
+
+** groff
+#+begin_src bash
+LFS_TARGET=groff
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+PAGE=<paper_size> ./configure --prefix=/usr
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+** grub
+#+begin_src bash
+LFS_TARGET=grub
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+unset {C,CPP,CXX,LD}FLAGS
+
+echo depends bli part_gpt > grub-core/extra_deps.lst
+
+./configure \
+--prefix=/usr \
+--sysconfdir=/etc \
+--disable-efiemu \
+--disable-werror
+
+make
+make install
+mv -v /etc/bash_completion.d/grub /usr/share/bash-completion/completions
+
+cd ..
+#+end_src
+
+
+** gzip 
+#+begin_src bash
+LFS_TARGET=gzip
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+** iproute
+#+begin_src bash
+LFS_TARGET=iproute
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+sed -i /ARPD/d Makefile
+rm -fv man/man8/arpd.8
+
+make NETNS_RUN_DIR=/run/netns
+make SBINDIR=/usr/sbin install
+
+#FIXME
+mkdir -pv /usr/share/doc/iproute2-6.10.0
+cp -v COPYING README* /usr/share/doc/iproute2-6.10.0
+
+cd ..
+#+end_src
+
+
+** kbd
+#+begin_src bash
+LFS_TARGET=kbd
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+patch -Np1 -i ../kbd-2.6.4-backspace-1.patch
+sed -i '/RESIZECONS_PROGS=/s/yes/no/' configure
+sed -i 's/resizecons.8 //' docs/man/man8/Makefile.in
+./configure --prefix=/usr --disable-vlock
+make
+make check
+make install
+
+#FIXME
+cp -R -v docs/doc -T /usr/share/doc/kbd-2.6.4
+
+cd ..
+#+end_src
+
+
+** libpipeline
+#+begin_src bash
+LFS_TARGET=
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+cp -R -v docs/doc -T /usr/share/doc/kbd-2.6.4
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+** make
+#+begin_src bash
+LFS_TARGET=make
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+chown -R tester .
+su tester -c "PATH=$PATH make check"
+make install
+
+cd ..
+#+end_src
+
+
+** patch
+#+begin_src bash
+LFS_TARGET=patch
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+make check
+make install
+
+cd ..
+#+end_src
+
+
+** tar 
+#+begin_src bash
+LFS_TARGET=tar
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+FORCE_UNSAFE_CONFIGURE=1 \
+    ./configure --prefix=/usr
+make
+make check
+
+make install
+make -C doc install-html docdir=/usr/share/doc/tar-1.35
+
+cd ..
+#+end_src
+
+
+** texinfo
+#+begin_src bash
+LFS_TARGET=texinfo
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+./configure --prefix=/usr
+make
+make check
+make install
+make TEXMF=/usr/share/texmf install-tex
+
+pushd /usr/share/info
+    rm -v dir
+    for f in *
+        do install-info $f dir 2>/dev/null
+    done
+popd
+
+cd ..
+#+end_src
+
+
+** vim
+#+begin_src bash
+LFS_TARGET=vim
+tar -xf $LFS_TARGET*tar*
+cd $LFS_TARGET*/
+
+cd ..
+#+end_src
+
 
 ** 
 #+begin_src bash
@@ -1847,10 +2687,9 @@ LFS_TARGET=
 tar -xf $LFS_TARGET*tar*
 cd $LFS_TARGET*/
 
-
-
 cd ..
 #+end_src
+
 
 ** 
 #+begin_src bash
@@ -1858,10 +2697,9 @@ LFS_TARGET=
 tar -xf $LFS_TARGET*tar*
 cd $LFS_TARGET*/
 
-
-
 cd ..
 #+end_src
+
 
 ** 
 #+begin_src bash
@@ -1869,10 +2707,9 @@ LFS_TARGET=
 tar -xf $LFS_TARGET*tar*
 cd $LFS_TARGET*/
 
-
-
 cd ..
 #+end_src
+
 
 ** 
 #+begin_src bash
@@ -1880,10 +2717,9 @@ LFS_TARGET=
 tar -xf $LFS_TARGET*tar*
 cd $LFS_TARGET*/
 
-
-
 cd ..
 #+end_src
+
 
 ** 
 #+begin_src bash
@@ -1891,29 +2727,15 @@ LFS_TARGET=
 tar -xf $LFS_TARGET*tar*
 cd $LFS_TARGET*/
 
-
-
 cd ..
 #+end_src
+
 
 ** 
 #+begin_src bash
 LFS_TARGET=
 tar -xf $LFS_TARGET*tar*
 cd $LFS_TARGET*/
-
-
-
-cd ..
-#+end_src
-
-** 
-#+begin_src bash
-LFS_TARGET=
-tar -xf $LFS_TARGET*tar*
-cd $LFS_TARGET*/
-
-
 
 cd ..
 #+end_src
