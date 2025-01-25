@@ -1,0 +1,643 @@
+#+TITLE:Базовый курс C++ (MIPT, ILab). Lecture 11. Исключения
+#+AUTHOR: idsyr
+#+DESCRIPTION: B11
+#+STARTUP: showeveryhing
+#+OPTIONS: toc:2
+
+* Обработка ошибок в стиле С
+- Определяется область целочисленных кодов ошибок:
+    #+begin_src C
+    enum error_t { E_OK = 0, E_NO_MEM, E_UNEXPECTED };
+    #+end_src
+- Как функция сигнализирует, что результат ее исполнения это E_OK?
+
+  - Вернет код ошибки
+    #+begin_src C
+    error_t open_file(const char *name, FILE **handle);
+    #+end_src
+
+
+  - Использует thread-local facility, например errno/GetLastError
+    #+begin_src C
+    FILE *open_file(const char *name);
+    #+end_src
+
+
+  - Вернет error_t* в списке параметров
+    #+begin_src C
+    FILE *open_file(const char *name, error_t *errcode);
+    #+end_src
+
+
+
+** Проблемы уже в С
+    #+begin_src C
+    int atoi(const char *nptr);
+    #+end_src
+- В случае, если конвертировать невозможно, возвращает 0
+  - Действительно ли возвращать ноль хорошая идея?
+- В случае, если число слишком большое, возвращает HUGE_VAL и устанавливает errno = ERANGE
+  - Часто ли вы проверяли возврат на HUGE_VAL?
+
+
+** Проблема в С++
+- Здесь должна быть обработка того что malloc может вернуть null 
+    #+begin_src C++
+    template <typename T> class MyVector {
+        T *arr_ = nullptr;
+        size_t size_, used_ = 0;
+    public:
+        MyVector(size_t sz): size_(sz) {
+            arr_ = static_cast<T*>(malloc(sizeof(T) * sz));
+            // тут должна быть обработка этого случая
+        }
+    }
+    #+end_src
+- Но что возвращать из конструктора?
+    - Возможно errno
+    - Возможно как в iostream - badbit
+    - Возможно ничего не делать:
+
+** Чем нам грозит эта ситуация?
+- Зачем нужен ООП -> сохранять инвариант класса
+- Несогласованное (неконсистентное) состояние - нарушен инвариант класса
+    #+begin_src C
+    MyVector v(100);
+    // Тут обьект v может оказаться в несогласованном состоянии
+    // v.arr_ = 0 т.к. память кончилась
+    // v.size_ = 100 т.к. конструктор никак не обработал ошибку
+    #+end_src
+- Хуже всего то, что обьект в несогласованном состояниии никак не отличается от нормального состояния
+- Несогласованность может проявится через тысячи строк кода
+- Это даже не UB. Несогласованное состояние вполне корректно
+
+
+
+
+** Попытка решения: iostream style
+    #+begin_src C++
+    template <typename T> class MyVector {
+        T *arr_ = nullptr;
+        size_t size_, used_ = 0;
+        bool valid_ = true;
+        public:
+        MyVefctor(size_t sz): size_(sz) {
+            arr_ = static_cast<T*>(malloc(sizeof(T) * sz));
+            if(!arr_) valid = false;
+        }
+        bool is_valid() const { return valid_; }
+    }
+    #+end_src
+
+*** Обсуждение
+- Покритикуйте решение в стиле потоков ввода-вывода
+    #+begin_src C++
+    MyVector v(1000);
+    if(!v.is_valid()) return -1;
+    #+end_src
+- _В конце вызовется деструктор_
+
+*** Копирование и присваивание
+- Похоже такой вектор тяжело использовать
+    #+begin_src C++
+    MyVector v(1000); assert(v.is_valid());
+    MyVector v2(v);     assert(v2.is_valid());
+    v2.push_back(3);  assert(v2.is_valid());
+    v = v2;                  assert(v.is_valid());  
+    #+end_src
+- -DNDEBUG и все assert отключаются
+- Есть идеи получше?
+
+
+
+** Перегрузка операторов
+- Делает вещи еще хуже
+    #+begin_src C++
+    Matrix operator+(Matrix a, Matrix b);
+    #+end_src
+- Здесь неоткуда вернуть код возврата
+- Поскольку это отдельная функция, здесь негде сохранить goodbit 
+- Конечно мы все еще можем вернуть errno. Кому нравится идея его проверять в таких случаях?
+
+
+
+* Нелокальные методы обработки и виды исключений
+- В С++ есть вещи, которые из за сложности абстракций нельзя обработать _локальными механизмами передачи управления_
+  - _Локальный механизм передачи управления_ - Каждый раз переходя куда то вы статически знаете точку где вы оказались. Локальный означает что вы можете доказывать место где окажетесь только исходя из точки вызова
+** Основная идея решения 
+- Выйти из вызванной функции в вызывающий код в обход обычных механизмов возврата управления
+- Аннотировать этот нелокальный выход информацией о случившемся
+- Но что вообще мы знаем о нелокальных переходах?
+** Типы передачи управления
+*** Локальная передача управления
+- Условные операторы
+- Циклы
+- Локальный goto
+- Прямой вызов функций и возврат из них
+*** Нелокальная передача управления
+- Косвенный вызов функций (напр. по указателю)
+- Возобновление/приостановка сопраграммы
+- Исклчения
+- Переключение контекста потоков
+- Нелокльный longjump и вычислямый goto
+** Исключения
+- Исключительные ситуации уровня аппаратуры (например unified instruction exception)
+- Исключительные ситуации уровня операционной системы (например data page fault)
+- Исключения С++ (только они и будут нас далее интересовать)
+** Исключительные ситуации 
+*** Ошибки (исключительными ситуациями не являются)
+- рантайм ошибки, после которых состояние не восстановимо (например segmentation fault)
+- ошибки контракта функции (assertition failure из за неверных аргументов, нывыполненные предусловия вызова)
+*** Исключительные ситуации 
+- Состояние программы должно быть восстановимо (например: исчерпание памяти или отсутствие файла на диске)
+- Исключительная ситуация не может быть обработана на том уровне, на котором возникла (программа сортировки не обязана знать что делать при нехватке памяти на временный буффер)
+
+** В итоге нужны для:
+- Штук после которых мы можем восстановиться, иначе нужен abort()
+- Штук которые мы не можем обработать локально, иначе локальные управляющие конструкции 
+
+
+* Знакомство с исключениями 
+** Порождение ошибки 
+    #+begin_src C++
+    struct UnwShow {
+        UnwShow() { cout << "ctor\n"; }
+        ~UnwShow { cout << "dtor\n"; }
+    };
+    int foo(int n) {
+        UnwShow s;
+        if(n == 0) abort();
+        foo(n - 1);
+    }
+    foo(4); // на экране "ctor" 5 раз и "dtor" 0 раз
+    #+end_src
+** Порождение исключения 
+    #+begin_src C++
+    struct UnwShow {
+        UnwShow s;
+        if(n == 0) throw 1;
+        foo(n - 1);
+    };
+    // вызов внутри try-блока
+    foo(4); // что на экране?
+    // "ctor" x5
+    // "dtor" x5 (в обратном порядке, с последнего)
+    // тут программа входит в try блок
+    #+end_src
+- Раскрутка стека это его честная раскрутка, некими магическими штуками как бы законно вышли из функции, уничтожив там все что должно быть уничтожено, там нет никаких дополнительно привнесенных штук
+** Больше про throw
+- Конструкция throw <expression> означает следующее 
+    - создать обьект исключения
+    - начать размотку стека
+Примеры:
+    #+begin_src C++
+    throw 1;
+    throw new int(1);
+    throw MyClass(1, 1);
+    #+end_src
+
+
+* Как правильно бросать и ловить исключения
+- Исключения отличаются от ошибок тем, что их нужно ловить
+** Ловля исключений
+- Производится внутри try блока 
+    #+begin_src C++
+    int divide(int x, int y) {
+        if(y == 0) throw OVF_ERROR; // ЭТО ТАК СЕБЕ ИДЕЯ
+        return x / y;
+    }
+    // где-то далее:
+    try {
+        c = devide(a, b);
+    } catch (int x) { // правильный по типу найден - размотка заканчивается
+        // Вы в него попадаете с бектрейсом как до вызова devide()
+        if(x = OVF_ERROR) std::cout << "Overflow" << std::ednl;
+    }
+    #+end_src
+** Некоторые правила
+- ловля происходит по точному типу
+    #+begin_src C++
+    try { throw 1; } catch(long l) {} // не поймали
+    #+end_src
+- или по ссылке на точный тип
+    #+begin_src C++
+    try { throw 1; } catch(const int &ci) {} // поймали
+    #+end_src
+- Или по указателю на точный тип
+    #+begin_src C++
+    try { throw new int(1); } catch(int *pi) {} // поймали
+    #+end_src
+- Или по ссылке или указателю на базовый класс
+    #+begin_src C++
+    try { throw Deroved(); } catch(Base &b) {} // поймали
+    #+end_src
+- Преобразования не разрешены, даже unscoped enumerations 
+- Только одно преобразование оставили: derived -> base
+** Некоторые правила
+- catch-блоки пробуются в порядке перечисления
+    #+begin_src C++
+    try { throw 1; }
+    catch(long l) {} // не поймали
+    catch(const int &ci) {} // поймали
+    #+end_src
+- Пойманную переменную можно менять или удалять
+    #+begin_src 
+    try { throw new Derived(); } catch(Base *b) { delete b; } // ok
+    #+end_src
+- Пойманное исключение можно перевыбросить
+    #+begin_src 
+    try { throw Derived(); } catch(Base &b) { throw; } //ok
+    #+end_src
+** Обсуждение 
+- Чуть раньше был приведен следующий код для обработки ошибки переполнения
+    #+begin_src C++
+    enum class errs_t { OVF_ERROR, UDF_ERROR, /* и так далее */ };
+    int divide(int x, int y) {
+        if(y == 0) throw errs_t::OVF_ERROR; // ВСЕ ЕЩЕ ТАК СЕБЕ ИДЕЯ
+    }
+    #+end_src
+- Не хранит доп информации, errs_t должен быть в namespace'e
+- Очевидное улучшение: переход к классам исключений
+    #+begin_src C++
+    class MathErr { /* информация об ошибке */ };
+    class DivByZero : public MathErr { /* расширение */ };
+    int divide(int x, int y) {
+        if(y == 0) throw DivByZero("Division by zero occured");
+        return x / y;
+    }
+    // где то дальше 
+    catch(MathErr &e) {std::cout << e.what() << std::endl;}
+    #+end_src
+** Некоторые неприятности
+- Какие проблемы вы видите в этом коде?
+    #+begin_src C++
+    class MathErr { /* err info */ };
+    class Overflow : public MathErr { /* err info ext */ };
+    // somewhere futher
+    try {
+        // тут много опасного кода
+    }
+    catch(MathErr e) { /* processing all */ }
+    catch(Overflow o) { /* processing overflow */ }
+    #+end_src
+- Будет вызваться только первый
+- Будет срезка
+
+** Избегаем неприятностей
+    #+begin_src C++
+    class MathErr { /* информация об ошибке */ };
+    class Overflow : public MathErr { /* расширение */ };
+    // где то дальше
+    try {
+        // тут много опасного кода
+    }
+    // 1.  Правильный порядок: от частных к общим
+    // 2.  Ловим строго по косвенности
+    catch(Overflow& o) {}
+    catch(MathErr& e) {}
+    #+end_src
+- Тут все неплохо, но
+- Неужели я первый кто наткунулся на такие ошибки?
+
+
+* Стандартная иерархия исключений
+*** std::exception
+| как правило не должны создавать сами | испольозовать можно |
+| bad_alloc                            | runtime_error       |
+| bad_cast                             | logic_error         |
+| bad_exception                        |                     |
+| bad_function_call                    |                     |
+| bad_typeid                           |                     |
+| bad_weak_ptr                         |                     |
+** Стандартные классы исключений
+| std::runtime_error | std::logic_error |
+| range_error        | domain_error     |
+| regex_error        | invalid_argument |
+| system_error       | future_error     |
+| underflow_error    | our_of_range     |
+| overflow_error     | length_error     |
+** Обсуждение 
+- Какой интерфейс вы бы сделали у std::exception?
+    #+begin_src C++
+    struct exception {
+        exception() noexcept;
+        exception(const exception&) noexcept;
+        exception& operator=(const exception&) noexcept;
+        virtual ~exception();
+        virtual const char* what() const noexcept;
+    };
+    #+end_src
+- Аннотация noexcept означает обещание что это функция не выбросит исключений
+- Она распространяется на переопределения виртуальных функций
+- Запустить два исключения по стеку - std::terminate
+** Используем стандартные классы
+- Наследование от стандартного класса вводит расширение в иерархию
+    #+begin_src C++
+    class MathErr : public std::runtime_error {};
+    #+end_src
+- Исключения - дешевый механизм если их нет. Но это очень дорого если оно возникло
+*** Замечания
+- при catch(...) ловится все
+- при множественном наследовании с ссылкой на базовый не поймается
+- Если исключение не ловить - оно не произойдет (квантовая неопределенность)
+- В реальности все совсем по другому
+* Нейтральность 
+** Перехват всех исключений
+#+begin_src C++
+try {
+    // много опасного кода
+} catch(...) {
+    // обрабатываются все исключения
+}
+#+end_src
+- Сама идея, что можно как-то осмысленно обработать любое исключение очень сомнительна
+- Мы можем перехватить чужие исключения, плохо
+** Нейтральность
+- Функция называется нейтральной относительно исключений, если она не ловит чужих исключений
+- Хорошо написанная функция в хорошо спроектированном коде как минимум нейтральна
+**  Перевыброс
+- Единственное разумное применение catch(...) это очистка критического ресурса и rethrow исключения
+- На самом деле даже разумность этого варианта под сомнением
+#+begin_src C++
+int *critical = new int[10000]();
+try {} catch(...) {
+    delete [] critical;
+    throw;
+}
+#+end_src
+- а ЗАЧЕМ new в программе и не в деструкторе
+** Обсуждение 
+- Кажется есть одно место где мы не можем поймать исключение - список инициализации
+#+begin_src C++
+template <typename T> struct Foo {
+    T x_, y_;
+    Foo(int x, int y): x_(x), y_(y) { // exception in x_(x)
+    try {
+        // some actions
+    } catch(std::exception& e) {
+        // some processing
+    }
+}
+#+end_src
+** Try-блоки уровня функций
+- Мы можем завернуть всю функцию в try-block
+  #+begin_src C++
+  int foo() try { bar(); }
+  catch(std::exception& e) { throw; }
+  #+end_src
+- В том числе и конструктор
+  #+begin_src C++
+  Foo:Foo(int x, int y) try : x_(x), y_(y) {
+    // some actions
+  } catch (std::exception& e) {
+    // some processing
+  }
+  #+end_src
+- Ловить исключения в списке инициализации вообще не нужно, потому что если исключение в списке инициализации, исключение покидает конструктор до того как он отработал => обьект просто не создан => никакие ресурсы не утекли => исключение может лететь дальше
+** Catch уровня функций
+- На уровне функций, catch входит в scope функции
+#+begin_src C++
+int foo(int x) try {
+    bar();
+} catch(std::exception& e) {
+    std::cout << x << ": " << e.what() << std::endl; // ok
+}
+#+end_src
+- Увы, try-block на main не ловит исключения в конструкторах глобальных обьектов
+** Исключения для лучшего кода?
+*** Преимущества
+- Текст не замусоривается обработкой возврата или errno, вся обработка ошибок отделена от логики приложения
+- Ошибки не игнорируются по умолчанию. Собственно они не могут быть проигнорированы
+*** Недостатки
+- Code path disruption -  появление в коде неожиданных выходных дуг
+- некоторый оверхед на исключения (если не происходит то занимает место)
+- и еще...
+
+
+* Ложное чувство безопасности
+** Вернемся к исходной проблеме
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr_ = nullptr;
+    size_t size_, used_ = 0;
+public:
+    explicit MyVector(size_t sz) : size_(sz) {
+        arr_ = static_cast<T*>(malloc(sizeof(T)*sz));
+        if(!arr_) {
+            throw std::bad_alloc();
+        }
+    }
+}
+#+end_src
+- Этот код можно упростить, так как по сути тут написан оператор new
+#+begin_src C++
+explicit MyVector(size_t sz): arr_(new T[sz]), size_(sz_) {}
+#+end_src
+** Пример Каргилла
+- Все ли понимают что тут плохо?
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr = nullptr;
+    size_t size_, used = 0;
+public:
+    MyVector(const MyVector &rhs) {
+        arr_ = new T[rhs.size_];
+        size_ = rhs.size_; used_ = rhs.used_;
+        for(size_t i = 0; i != rhs.size_; ++i)
+            arr_[i] = rhs.arr_[i];
+            // может выбросить исключение из оператора присваивания
+    }
+}
+#+end_src
+- Нет обьекта => нет деструктора
+- Нет деструктора => утечка памяти если случилось исключение из оператора присваивания
+** Безопасность относсительно исключений
+- Код в котором при исключении могут утечь ресуры, окзаться в несогласованном состоянии обьекты и прочее, называется небезопасным относительно исключений
+- Каргилл писал: "I suspect thar most members of the C++ commmunity vastly understimate the skilsls needed to program with exeptions and therfore understimate the true consts of their use"
+- И в общем это до сих пор так, хотя прекрасные книги Саттера сильно улучшили общую грамотность
+- В локальных управляющих конструкциях весь код безопасный
+- код может быть небезопасным относительно исключений, относительно многопоточности => относительно нелокальных управляющий конструкций 
+* Гарантии безопасности
+** Гарантии безопасности
+- Базовая гарантия: исключение при выполнении операции может изменить состояние программы, но не вызвает утечек и оставляет все обьекты в согласованном (но не обязательно предсказуемом) состоянии (прям как в move присваивании)
+- Строгая гарантия: при исключении гарантируется неизменность состояния программы относительно задействованных в операции обьектов (commit/rollback)
+- Гарантия бессбойности: функции не генерируют исключений(noexcept)
+** Безопасное копирование 
+#+begin_src C++
+template <typename T> 
+T *safe_copy(const T* src, size_t srcsize) {
+    T *dest = new T[srcsize];
+    try {
+        for(size_t idx = 0; idx != srcsize; ++idx)
+            dest[idx] = src[idx];
+    } catch(...) {
+        delete [] dest;
+        throw;
+    }
+    return dest;
+}
+#+end_src
+- Завернуть new в обертку? Но мы уже в обертке
+- Рано или поздно мы должны вызвать настоящий new и в этот момент catch(...) становиться обоснован
+- Но даже здесь можно этого избежать, но об этом далее
+** Теперь конструктор копирования
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr_ = nullptr;
+    size_t size_, used_ = 0;
+public:
+    MyVector(const MyVector &rhs):
+        arr_(safe_copy(rhs.arr_, rhs.size_)),
+        size_(rhs.size_), used_(rhs.used_) {}
+}
+#+end_src
+** Оператор присваивания
+- Вы видите проблемы в этой реализации?
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr_ = nullptr;
+    size_t size_, used_ = 0;
+public:
+    MyVector& operator=(const MyVector &rhs) {
+        if(this == &rhs) return *this;
+        delete [] arr;
+        arr_ = safe_copy(rhs.arr_, rhs.size_);
+        size_ = rhs.size_; used_ = rhs.used_);
+        return *this;
+    }
+}
+#+end_src
+- Обьект в согласованном но не слишком предсказуемом состояни, size_ не соответствует
+** Оператор присваивания v2 
+#+begin_src C++
+MyVector& operator=(const MyVector &rhs) {
+    if(this == &rhs) return *this;
+    T* narr = safe_copy(rhs.arr_, rhs.size_);
+    delete [] arr_;
+    arr_ = narr;
+    size = rhs.size_; used_ = rhs.used_;
+    return *this;
+}
+#+end_src
+- Теперь ok, но это как то хрупко и подвержено случайным проблемам
+
+** Внезапно swap
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr = nullptr;
+    size_t size_, used_ = 0;
+public:
+    void swap(MyVector& rhs) {
+        std::swap(arr_, rhs.arr_);
+        std::swap(size_, rhs.size_);
+        std::swap(used_, rhs.used_);
+    }
+}
+#+end_src
+- Вроде бы этот оператор не бросает исключений и это хочется задокументировать
+
+** Интерлюдия: noexcept
+- Специальное ключевое слова noexcept документирует гарантию бессбойности для кода 
+#+begin_src C++
+void swap(MyVector& rhs) noexcept {
+    // ...
+}
+#+end_src
+- При оптимизациях компилятор будет уверен что исключений не будет
+- Если они все таки вылетят, то это сразу std::terminate
+- Вы не должны употреблять noexcept там где исключения все же возможны
+
+* Линия Калба
+** Оператор присваивания: линия Калба
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr_ = nullptr;
+    size_t size_, used_ = 0;
+public:
+    void swap(MyVector& rhs) noexcept;
+    MyVector& operator=(const MyVector &rhs) {
+        MyVector tmp(rhs); // тут мы можем бросить исключени
+//-------------линия-Калба-----------------
+        swap(tmp);
+        return *this;
+    }
+}
+#+end_src
+- Это дает строгую гарантию по присваиванию 
+- По коду вашего метода для строгой гарантии вы должны быть в состоянии провести черту, линию калба, такую, что выше этой черты вы не меняли состояние класса, а ниже не бросали исключения
+
+** Подумаем про push?
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr_ = nullptr;
+    size_t size_, used_ = 0;
+public: 
+    void push(T new_elem);
+}
+#+end_src
+- Может потребоваться реаллокация если size_ == used_
+
+** Kalb line 
+- При проектировании очень полезно провести в уме эту линию
+#+begin_src C++
+void push(const T& t) {
+    if(used_ == size_) {
+        MyVector tmp(size_*2 + 1);
+        while(tmp.size() < used_)
+            tmp.push(arr_[tmp.size()]);
+        tmp.push(t);
+    //-----------------------------------
+        swap(*this, tmp);
+        return;
+    }
+    // и так далее
+}
+#+end_src
+
+** Обсуждение 
+- Возможна критика: что если деструктор выбросит исключение. Попробуем от этого защититься
+#+begin_src C++
+template <typename Fwditer>
+void destroy(FwdIter first, FwdIter last) {
+    while(first++ != last) try {
+        destroy(&*first);
+    } catch(...) {
+        // и что здесь делать?
+    }
+}
+#+end_src
+
+** Правило для деструкторов 
+- Исключения не должны покидать деструктор
+- По стандарту исключение, покинувшее деструктор, если при этом остались необработанные исключения, приводит к вызову std::terminate и завершение программы
+
+** Условный noexcept
+- Некоторые функции непонятно аннотировать noexcept или нет?
+#+begin_src C++
+template <class T>
+T copy(T const& original) /* noexcept? */ {
+    return original;
+}
+#+end_src
+- Для подавляющего большинства типа Т, для разумных, не выбросит исключения, для всех фундаментальных не выбросит исключения
+- Перегрузку для всех фунд типов без noexcept и для всех нефунд с noexcept писать мы бы не хотелиэ
+- noexcept существует в двух видах, в виде аннотации и в виде оператора _Сегодня мы говорили только об аннотациях_
+- В след раз будет также о том, каким образом наличие исключений в классе может влиять на проектирование, как правильно проектировать и как уйти от catch(...)
+
+* Обзор литературы
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
