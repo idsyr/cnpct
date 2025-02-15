@@ -1,0 +1,497 @@
+#+title: Базовый курс C++ (MIPT, ILab). Lecture 12. Безопасность исключений
+#+authoy: idsyr
+
+
+
+
+* В предыдущей серии
+** Интерлюдия: noexcept
+- Специальное ключевое слово noexcept документирует гарантию бессбойности для кода
+#+begin_src c++
+void swap(MyVector& rhs) noexcept {
+    std::swap(arr_, rhs.arr_);
+    std::swap(size_, rhs.size_);
+    std::swap(used_, rhs.used_);
+}
+#+end_src
+- При оптимизациях компилятор будет уверен что исключчений не будет 
+- Если все таки вылетят, то это сразу std::terminate
+- Вы не должны употреблять noexcept там где исключения все же возможны
+
+- Базовая гарантия: исключение вылетело и после этого все обьекты остались в консистентном, но не обязательно в предсказуемом состоянии
+  - Все что можно сделать с таким обьектом это дать ему умереть
+- Строгая гарантия: Исключение полетело, но ничего не изменилось
+  - Commit-rollback семантика
+- Гарантия бессбойности: Исключение не вылетело и вылететь не может
+
+** Оператор присваивания: линия Калба
+#+begin_src cpp
+template <typename T> class MyVector {
+  T *arr = nullptr;
+  size_t size_, used_ = 0;
+public:
+  void swap(MyVector& rhs) noexcept;
+  MyVector* operator= (const MyVector &rhs) {
+	MyVector tmp(rhs); // тут мы можем бросить исключение
+	// ----------------------CALBLINE--------------------
+	swap(tmp); // тут мы меняем состояние класса
+	return *this;
+  }
+}
+#+end_src
+- Это дает строгую гарантию по присваиванию
+
+- Все что выше линии не меняет состояния класса, все что ниже не бросает исключений
+- И стремиться к строгой гарантии может быть не оптимально, возможно базовой гарантии может быть достаточно
+
+** Kalb line 
+- При проектировании очень полезно провести в уме эту линию
+#+begin_src cpp
+void push(const T& t) {
+  if(used_ == size_) {
+	MyVector tmp(size_ * 2 + 1);
+	while(tmp.size() < used_)
+	  tmp.push(arr_[tmp.size()]);
+	tmp.push(t);
+	// ----------------------CALBLINE--------------------
+	swap(*this, tmp);
+	return;
+  }
+}
+#+end_src
+- Здесь swap это noexcept если ваш move assignment & move конструктор - noexcept, поэтому здесь это свойство важно
+
+* Условный noexcept
+** Условный noexcept
+- Некоторые функции непонятно аннотировать noexcept или нет?
+#+begin_src c++
+template <class T>
+T copy(T const& orig) /* noexcept */ {
+    return orig;
+}
+#+end_src
+- Некоторые функции можно различать простыми определителями
+#+begin_src c++
+template <class T>
+T copy(T const& orig) noexcept(is_fundamental<T>::value) {
+    return orig;
+}
+#+end_src
+- noexcept(true) это все равно что просто noexcept
+- noexcept(false) это его отсутствие а не обещание что функция точно что то бросит. Может использоваться чтобы пометить что деструктор может выбросить исключение 
+- Решение рабочее, но недостаточно точное. Даже у типов, не являющихся фундаметальными, копирующий конструктор может не брость исключений.
+** Оператор noexcept
+- для более тонкой настройки служит оператор noexcept 
+#+begin_src c++
+template <class T> 
+T copy(T const& orig) noexcept(noexcept(T(orig))) {
+    return orig;
+}
+#+end_src
+- И вот вложенное это опрератор, а внешнее это аннотация, да вот так
+- Оператор noexcept возвращает true или false в зависимости от вычисления выражения под ним на этапе компиляции
+- разумеется выражение T(orig) выглядит так себе
+
+
+
+
+** Оператор noexcept: альтернативы
+- Очень часто, если хочется спросить, лучше спросить явно
+#+begin_src C++
+template <class T>
+T copy(T const& orig) noexcept(std::is_nothrow_copy_constructible<T
+#+end_src
+- Внутри этот определитель реализован через оператор noexcept и настоящее место этого оператора именно там в библиотечном коде
+- Тем не менее, какие то детали о нем знать полезно
+
+
+
+
+
+** Оператор noexcept: детали
+- Оценивает каждую функцию, задействованную в выражени, но не вычисляет выражение
+#+begin_src C++
+struct ThrowingCtor { ThrowingCtor(){} }; // у нас нет гарантий что не бросит исключение
+void foo(ThrowingCtor) noexcept;
+void foo(int) noexcept;
+
+assert(noexcept(foo(1)) == true);
+assert(noexcept(foo(ThrowingCtor{})) == false);
+#+end_src
+- Возвращает false для constant expressions
+- Интересно, что разыменование nullptr это вариант нормы для noexcept
+- Noexcept оператор это проверка
+- Noexcept аннотация это обещание
+*** IN VIM
+#+begin_src C++
+struct ThrowingCtor {
+    ThrowingCtor() {} // бросает исключение
+    ThrowingCtor() =default; // не бросает
+
+    ThrowingCtor(const ThrowingCtor &) =default; // noexcept потому что наследует от класса, а в классе нет полей. Если есть поле которое при копировании могло бы выбросить исключение - то нет
+    ThrowingCtor(ThrowingCtor &&) =default;
+}
+
+struct Inherited {
+    ThrowingCtor c; 
+}
+    // cp ctor noexcept
+
+noexcept(*static_cast<int *>(nullptr)) // не UB
+// Мы можем разыменовать nullptr в typeid
+
+#+end_src
+
+
+
+** Обсуждение: noexcept(false)
+- Любой декструктор по умолчанию noexcept
+- Одним из способов позволить исключениям покидать деструктор является его пометка как noexcept(false)
+- Вы должны быть осторожны, помечая так деструкторы потому что деструктор сам по себе используется в процессе размотки
+- Вы можете проверить внутри деструктора идет ли размотка посредством вызова std::uncaught_exceptions()
+- И если бросать исключение из деструктора, помеченного noexcept(false), то проверить нужно
+- И что делать если действительно исключение помимо нашего летит?
+- Взять уже активное и врапнуть в наше новое исключение например
+
+
+* Коварное извлечение 
+** Извелечение из массива
+- Безопасен ли этот код относительно исключений?
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr_ = nullptr;
+    size_t size_, used_ = 0;
+public:
+    T pop() {
+        if(used_ <= 0) throw underflow{};
+        T result = arr_[used_ - 1];
+        used_ -= 1;
+        return result;
+    }
+}
+#+end_src
+** Внезапная проблема
+- Кажется, что все хорошо
+- Но что произойдет в точке использования?
+#+begin_src C++
+MyVector<SomeType> v;
+// Тут много кода
+SomeType s = v.pop(); //исключение при копировании в s
+#+end_src
+-  Тогда окажется, что обьект уже удален, но по месту назначения не приешл и навсегда потерян
+
+** Извлечение из массива v2
+- И ТУТ правильное проектирование страхует от проблем
+#+begin_src C++
+template <typename T> class MyVector {
+    T *arr_ = nullptr;
+    size_t size_, used_ = 0;
+public:
+    T top() const {
+        if(used_ <= 0) throw outofbounds{};
+        return arr_[used_ - 1];
+________________________________KALB_LINE____________
+    void pop() {
+       if(used_ <= 1) throw underflow{};
+       used_ -= 1;
+    }
+}
+#+end_src
+
+** Обсуждение
+- Оказывается безопасность относительно исключений влияет на проектирование
+- Если это так, то почему бы сразу не спроектировать нечто, что нам удобно и будет делать безопасным?
+- Удивительно, но для этого нам надо будет посмотреть на тонкости работы с памятью
+
+
+
+
+
+
+
+
+* Перегрузка new/delete
+** Глобальные операторы
+- В языке С для выделения памяти служат функции malloc и free
+#+begin_src C++
+void *p = malloc(10);
+free(p);
+#+end_src
+- В языке С++ этим занимаются операторы new и delete
+- При этом в отличии, от, скажем, оператора +, у них есть глобальные формы
+- 
+- Когда вы пишите new-expression для встроенного типа, он будет истолкован именно как вызов глобального оператора
+#+begin_src C++
+int *n = new int(5); // выделение + констрирование
+n = (int *) ::operator new(sizeof(int)); // только выделение
+#+end_src
+- Второе как malloc, но еще может выбросить исключение
+
+
+
+
+** Глобальные операторы (AGAIN)
+- Вы можете переопределить глобальные операторы и изменить поведение всех классов, которые ими пользуются
+#+begin_src C++
+void *operator new(std::size_t n) {
+    void *p = std::malloc(n);
+    if(!p) throw std::bad_alloc{};
+    std::printf("Alloc: %p, size is %zu\n", p, n);
+    return n;
+}
+#+end_src
+- Теперь что мы ожидаем увидеть на экране при создании списка из одного элемента?
+#+begin_src C++
+std::list<int> l;
+l.push_back(42);
+#+end_src
+- Ну он напишет сколько ушло на ноду, вот такой пример.
+
+
+
+**  Обсуждение
+- Мы отделяем вызов конструкторов от выделения памяти, но что если конструктор выбросит исключение?
+#+begin_src C++
+struct S {
+    S(); // десятый конструктор кинет исключение
+    ~S();
+};
+S &sarr = new S[20];
+#+end_src
+- Сколько тут будет конструкторов и деструкторов, если мы знаем что new[] дает строгую гарантию
+- Оператор new обязан предоставлять строгую гарантию, поэтому здесь мы не боимся утечек памяти
+- Если случается исключение на 10m деструкторе, до new обязан вызвать 10 деструкторов, после чего прибить свою память, т.е. полностью отменить все
+- Поэтому вы должны помнить - переопределяет new[] - вы подписываетесь на строгую гарантию. Одако предусмотрены и noexcept варианты 
+
+
+
+** Формы глобальных операторов
+- Основные формы все в чём то похожи на malloc
+#+begin_src C++
+void *operator new(std::size_t);
+void operator delete(void*) noexcept;
+void *operator new[](std::size_t);
+void operator delete[](void&) noexcept;
+#+end_src
+- Предусмотрены также дополнительные варианты с семантикой noexcept
+#+begin_src C++
+void *operator new(std::size_t, const std::nothrow_t&) noexcept;
+void *operator new[](std::size_t, const std::nothrow_t&) noexcept;
+#+end_src
+- Пока что должно быть не слишком понятно как их использовать
+
+
+
+
+
+
+** Небросающий new 
+- Если для new-expression не передано аргументов, она раскрывается просто
+#+begin_src C++
+p = new int{42};
+// reulst: p = (int *) ::operator new(sizeof(int)); *p = 42;
+#+end_src
+- Если аргументы переданы, они становятся в конец глобального оперетора 
+#+begin_src C++
+p = new (nothrow) int{42};
+// result: p = (int *) ::operator new(sizeof(int), nothrow); *p = 42;
+#+end_src
+- Специальный аргумент std::nothrow типа std::notrow_t (единственная константа этого типа(как nullptr)) показывает, что мы не хотим бросать исключение
+- Тогда нем надо возвращать нулевой указатель при нудаче
+
+
+
+
+
+
+** Размещающий new
+- Мы разрешили передавать в скобки что нибудь. Так Давайте передадим сюда указатель - это означает что уже где то есть память, но все что нам нужно это просто вызвать конструктор
+- Но вот эту версию нельзя перегрузить глобально
+#+begin_src C++
+void* operator new(std::size_t size, void* ptr) noexcept;
+void* operator new[](std::size_t size, void* ptr) noexcept;
+#+end_src
+- Он называется размещающим new и ему не соответствует никакого delete потому что все что он делает это размещает обьект в сырой памяти
+
+
+
+
+
+** Работа с размещающим new
+- Работа с памятью отделена от работы с обьектом в памяти
+#+begin_src C++
+void *raw = ::operator new(sizeof(Widget), std::nothrow); // Выделяем память
+if(!raw) { /* обработка */ }
+Widget *w = new (raw) Widget *w = new (raw) Widget; // Конструируем в памяти
+// тут использование w
+w->~Widget(); // а тут вызвать РУКАМИ деструктор
+::operator delete(raw);
+#+end_src
+- Обсуждение: может ли это помочь проектирование безопасных контейнеров?
+
+
+
+** Переопределение new и delete
+- Замечательным свойством new и delete является возможность переопределять их НЕ ГЛОБАЛЬНО, а не уровне своего класса
+#+begin_src C++
+struct Widget {
+    static void *operator new(std::size_t n);
+    static void operator delete(void *mem) noexcept;
+};
+#+end_src
+- Теперь для класса Widget будут использоваться его собственные операторы, а не глобальные
+- При этом, в отличии от глобального, размещающий new тоже может быть переопределен
+
+
+** Работа с пользовательским классом
+- new с исключением при исчерпании памяти
+#+begin_src C++
+Widget *w = new Widget; // возможно bad_alloc
+#+end_src
+- new с возвреатом нулевого указателя
+#+begin_src C++
+Widget *w = new(std::nothrow) Widget;
+if(!w) { /* обработка */ }
+#+end_src
+- размещающий new
+#+begin_src C++
+void *raw = ::operator new(sizeof(Widget)); // bad_alloc
+Widget *w = new (raw) Widget;
+#+end_src
+
+
+
+
+
+
+* Присваивание Степанова
+** Обсуждение 
+- Что вы думаете о таком операторе присваивания?
+#+begin_src C++
+T& T::operator=(T const& x) {
+    if(this != &x) {
+        this->~T();
+        new (this) T(x); // ВЫЛЕТАЕТ исключение, вызвается деструктор
+    }
+    return this;
+}
+#+end_src
+- Но деструктор мы уже вызвали
+
+
+* Буфер для вектора
+** Отдельная реализация
+- Идея для проектирования ваших классов с учетом исключений это разделить функциональность:
+  - Класс, работающий с сырой памятью
+  - Использующий обьекты этого класса внешний класс, работающий с типизированным содержанием
+- Для этого часто используется управление памятью вручную через нестандартные формы new и delete
+
+#+begin_src C++
+~MyVectorBuf() {
+    destroy(arr, arr + used_);
+    ::operator delete(arr_);
+}
+MyVector(const MyVector &rhs) : MyVectorBuf<T>(rhs.used_) {
+    while(used_ < ths.used_) {
+        construct(arr_ + used_, rhs.arr_[used_]);
+        used += 1;
+    }
+}
+#+end_src
+- 6 construct вызвал исключение - MyVector не начал жить, но MyVectorBuf начал, и у него used_ ровно столько, сколько нам удалось вызвать construct'ов, и значит будет вызван деструктор MyVectorBuf, в котором будут вызваны все деструкторы и убита выделенная сырая память
+
+** Общий вывод
+- Проектирование с использованием исключений в итоге позволяет упростить и улучшить код, структурируя его с четком распределением ответственности
+| MyVectorBuf                   | MyVector                        |
+| Абстрагирует работу с памятью | Предоставляет интерфейс массива |
+
+
+* Перемещение для push 
+- Приведенный ранее метод push не очень эффективен
+#+begin_src C++
+void push(const T &t) {
+    assert(used_ <= size_);
+    if(used_ == size_) {
+        std::cout << "Realloc\n";
+        MyVector tmp(size_ * 2 + 1);
+        while(tmp.size() < used_)
+            tmp.push(arr_[tmp.size()]; // копирование 
+        tmp.push(t);
+        std:swap(*this, tmp);
+    } else {
+        construct(arr_ + used_, t);
+        used_ += 1;
+    }
+}
+#+end_src
+- Можем ли мы вместо этого использовать перемещение?
+- Нет, std::move из const& это тоже копирование 
+
+
+** Первая проблема: константность
+- Нам придется немного дублировать чтобы не снимать константность
+- Это не очень хороший способ, но вот так вот мы можем справиться
+#+begin_src C++
+void MyVector::push(const T& t) { T t2(t); push(move(t2)); }
+void MyVector::push(T&& t) {
+    if(used_ == size_) {
+        MyVector tmp(size_*2+1);
+        while(tmp.size() < used_)
+            tmp.push(std::move(arr_[tmp.size()])); // перемещение
+        tmp.push(std::move(t));
+        swap(*this, tmp);
+    }
+}
+#+end_src
+- Тут все хорошо?
+- Если move может бросить исклчение то здесь появляются проблемы строгой гарантии 
+- move меняет состояние класса, а значит линия калба должна проходить выше
+** Вторая проблема: линия Калба 
+- Идея сделать его более эффективным использует move
+- Но это порождает проблемы: мы портим состояние arr
+
+
+
+** Решение
+- Перемещающие конструктор и присваивание не должнф бросать исключений
+#+begin_src C++
+MyVector(MyVector &&rhs) noexcept = default;
+MyVector& operator=(MyVector &&rhs) noexcept = default;
+#+end_src
+- При этом если они нерпавильные или их нет, помещение в контейнер становится менее эффективным
+#+begin_src C++
+void MyVector::push(const T& t) {
+    if(std::is_nothrow_move_assignable<T>::value) push_move(t);
+    else                                          push_copy(t);
+}
+#+end_src
+** Смещение линии Калба
+- Случай с копированием
+#+begin_src C++
+MyVector tmp(size_*2+1);
+while(tmp.size() < used_)
+    tmp.push(arr_[tmp.size()]);
+//_____________________CALBLINE__________________
+swap(*this, tmp);
+#+end_src
+
+
+- Случай с перемещением
+#+begin_src C++
+MyVector tmp(size_*2+1);
+//_____________________CALBLINE__________________
+while(tmp.size() < used_)
+    tmp.push(move(arr_[tmp.size()]));
+tmp.push(move(t));
+swap(*this, tmp);
+#+end_src
+
+
+** Обсуждение
+- Исключения влияют на проектирование
+- Использование перемещающих конструкторов влияет на проектирование
+- Кажется приходит время обсудить проектирование 
+
+
+* Static asserts
+- static_assert
