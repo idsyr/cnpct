@@ -1,0 +1,516 @@
+#+title: Базовый курс C++ (MIPT, ILab). Lecture 16. Специализация и инстанцирование.
+#+author: idsyr
+
+* Снова про OpenCL C++ API
+** Первый шаг: reference handler
+- Почти любая сущность в OpenCL является ref-counted и имеет два специальных метода: retain и release
+- clRetainMemObject(cl_mem), clReleaseMemObject(cl_mem)
+- clRetainDevice(cl_device_id), clReleaseDevice(cl_device_id)
+- clRetainContext(cl_context), clReleaseContext(cl_context)
+- Разумно сделать некий класс, абстрагирующий это. Но увы, нет никакой систмености в этих функциях 
+
+
+
+
+
+* Идея шаблонной специализации
+** Идея специализации
+- Шаблон класса может быть специализирован, то есть его частный случай для конкретного типа может быть указан непосредственно
+#+begin_src cpp
+template <typename T> struct S {
+    void dump() { std::cout<< "for all\n"; }
+}
+template <> struct S<int> {
+    void dump() { std::cout << "for int\n"; }
+}
+S<int> s1; s1.dump();    // используется ваша специализация
+S<double> s2; s2.dump(); // специализацию делает компилятор
+#+end_src
+
+
+** Собираем reference handler
+- Общий случай: 
+#+begin_src cpp
+template <typename T> struct ReferenceHandler {   };
+#+end_src
+- Конкретные случаи:
+#+begin_src cpp
+template <> struct ReferenceHandler<cl_mem> {
+    static cl_int retain(cl_mem memory) {
+        return ::clRetainMemObject(memory);
+    }
+    static cl_int release(cl_mem memory) {
+        return ::clReleaseMemObject(memory);
+    }
+};
+#+end_src
+- Теперь ReferenceHandler<X>::release() это либо release X либо ошибка (потому что пустой общий случай)
+
+
+** Второй шаг: wrapper
+- Враппер хранит в себе обьект и вызвает release на уничтожении
+#+begin_src cpp
+template <typename cl_type> class Wrapper {
+protected:
+    cl_type obj_;
+public:
+    Wrapper(cl_type obj = NULL) : obj_(obj) {}
+    ~Wrapper() { if(obj_) release(); }
+
+    // делегирует к ReferenceHandler<cl_type>::release(obj_)
+    cl_int release() const;
+#+end_src
+
+
+
+
+
+* Соглашение о namespace detail
+** Второй шаг: wrapper
+- Также обратим внимание на перегруженные круглые скобки
+#+begin_src cpp
+const cl_type& operator ()() const { return object_; }
+cl_type& operator ()() { return object_; }
+cl_type get() const { return object_; }
+#+end_src
+- У этого решения есть очевидная проблема:
+#+begin_src cpp
+Wrapper<T> a, b;
+a() = b();
+#+end_src
+- Будет работать без release и retain. Чудовищщное нарушение инкапсуляции
+- Но класс Wrapper находится в namespace detail, т.е. по конвенции не предназначен для использования извне
+
+
+** Обсуждение
+- Эта идея завернуть все лишнее в namespace detail пока что встречается в мире часто
+- С распространением модулей она уйдет в прошлое, так как модули позволяют определить классы не экспортируя их из модуля
+- Кстати, как вы думаете, а делать врапперу виртуальный деструктор?
+
+
+** Третий шаг: девайс
+- Теперь конкретный класс для девайса может быть унаследован от враппера
+#+begin_src cpp
+class Device : public detail::Wrapper<cl_device_id> 
+#+end_src
+- Возможно некоторое переиспользование копирования и присваивания
+#+begin_src cpp
+Device(const Device& dev) : detail::Wrapper<cl_type>(dev) {}
+Device& operator = (const Device &dev) {
+    detail::Wrapper<cl_type>::operator=(dev);
+    return *this;
+}
+#+end_src
+- Увы, определять их приходится из за контроля типа в rhs
+
+
+** Третий шаг: девайс
+- Однако у нас есть небольшая засада
+#+begin_src cpp
+vector<Device> devices;
+
+vector<cl_device_id> ids(n);
+::clGetDeviceIDs(platform, type, n, ids.data(), NULL);
+
+devices.resize(n);
+
+for (size_type i = 0, e = ids.size(); i < e; ++i) 
+    devices[i] = Device(ids[i]); // copy и сразу release
+#+end_src
+- Таким образом мы теряем девайсы из за сбоя в счетчике ссылок
+
+
+** Выход: специальный конструктор
+- Мы можем предусмотреть специальный retain-ctor
+#+begin_src cpp
+explicit Device(const cl_device_id &device, bool retainObject = false) : detail::Wrapper<cl_type>(device, retainObject) {}
+#+end_src
+- И если надо создать временный обьект, создавать его c retain
+#+begin_src cpp
+for(size_type i = 0; e = ids.size(); i < e; ++i) 
+    device[i] = Device(ids[i], true);
+#+end_src
+- Теперь все хорошо, счетчик ссылок сходится
+
+
+* Идея характеристик типов
+** Этюд: получение информации
+- У нас есть возможность запросить информацию о девайсе
+#+begin_src cpp
+char buf[STRING_BUFSIZE];
+::clGetPlatformInfo(pid, CL_PLATFORM_NAME, sizeof(buf), buf, NULL);
+cl_uint ubuf;
+::clGetDeviceInfo(devid, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, sizeof(ubuf), &ubuf, NULL);
+#+end_src
+- Мы бы хотели:
+#+begin_src cpp
+std::string pname = p.getInfo<CL_PLATFORM>();
+undigned md = d.getInfo<CL_DEVICE_MAX_WORK_ITEM_DIMESIONS>();
+#+end_src
+
+
+** Этюд: получение информации 
+ - Первый шаг очевиден: завести эту функцию 
+#+begin_src cpp
+class Device : public detail::Wrapper<cl_device_id> {
+    ??? getInfo(cl_int* err = NULL) const {
+        // Делегация к detail::getInfo
+    }
+}
+#+end_src
+
+
+** Идея: type traits
+- Заводим специальную структуру, чем то похожую на  ReferenceHandler
+- https://github.khronos.org/OpenCL-CLHPP/opencl_8hpp_source.html#l01452
+#+begin_src cpp
+template <typename T, cl_int Name> struct param_traits {};
+#+end_src
+- Теперь можно как и раньше расписать специализации
+#+begin_src cpp
+template<> struct param_traits<cl_platform_info, CL_PLATFORM_NAME> {
+    enum { value = CL_PLATFORM_NAME };
+    using type = std::string;
+}
+#+end_src
+- Обратите внимание: теперь ключевую роль играют не вложенные функции, а вложенный тип
+
+
+** Этюд: получение информации
+- Теперь используем здесь наши type traits
+#+begin_src cpp
+class Device : public detail::Wrapper<cl_device_id> {
+    template <cl_device_info name> 
+    typename param_traits<cl_device_info, name>::type 
+    getInfo(cl_int* err = NULL) const {
+        // делегация к detail::getInfo
+    }
+}
+#+end_src
+- круто
+
+
+** Иерархия классов
+- Полученная иерархия классов отражает предметную область естественным образом
+| Memory   |           |           |
+| Buffer   | Image     |           |
+| BufferGl | Image2D   | Image3D   |
+|          | Image2DGL | Image3DGL |
+- Для С API у нас конечно такого не было, там мы просто использовали cl_mem небезопасным образом
+- Обратите внимание на типы для OGL interop
+
+
+
+
+
+* Инстанцирование и специализации
+- (instance -> экземпляр) Экземплифицирование
+** Инстанцирование 
+- Инстанцирование это процесс порождения специализации
+#+begin_src cpp
+template <typename T>
+T max(T x, T y) { return x > y ? x : y; }
+.......
+max<int>(2, 3); // порождает template<> int max(int, int)
+#+end_src
+- Мы называем этот процесс неявным (imlicit) инстанцированием
+- Оно порождает код через подстановку параметра в шаблон
+
+
+** Инстанцирование и специализация 
+- Явная специализация может войти в конфликт с инстанцированием
+#+begin_src cpp
+template <typename T> T max(T x, T y) { ... }
+// ОК, указываем явную специализацию
+template <> double max(double x, double y) { return 42.0; }
+// никакой implicit instantiation не нужно
+int foo() { return max<double>(2.0, 3.0); }
+// процесс implicit instantiation нужен и он произошел
+int bar() { return max<int>(2, 3); }
+// ошибка: ODR violation
+template <> int max(int x, int y) { return 42; }
+#+end_src
+
+
+** Удаление специализаций
+- Частным случаем явной специализации является запрет специализации
+#+begin_src cpp
+// для всех указателей
+template <typename T> void foo(T*);
+// но не для char* и не для void* 
+template <> void foo<char>(char*) = delete;
+template <> void foo<void>(void*) = delete;
+#+end_src
+- Подобным образом можно удалять и перегрузки
+#+begin_src cpp
+void foo(char*) = delete;
+void foo(void*) = delete;
+#+end_src
+- Специализации можно явно самому писать
+- Можно запрещать
+- Просить компилятор неявно создавать
+- _Но еще можно просить явно создавать_
+
+
+
+* Ленивость инстанцирования
+** Ленивость и энергичность
+#+begin_src cpp
+int foo (int x, int y) { return (x > 3) ? 0 : y; }
+foo (a+3, b+2);
+#+end_src
+- С++ почти всегда энергичный
+- С почти всегда энергичный
+
+
+** Инстанцирование - ленивый процесс
+- Ниже если бы инстанцирование было энергичным, была бы ошибка
+#+begin_src cpp
+template <int N> struct Danger {
+    using block = char[N]; // ошибка если N меньше нуля
+};
+template <typename T, int N> struct Tricky {
+    void test_lazyness() { Danger<N> no_boom_yet; }
+};
+int main() {
+    Tricky<int, -2> ok; // ошибка только при ok.test_lazyness()
+}
+#+end_src
+- Но в данном случае инстанцировалось ровно то, что мы попросили
+
+
+** Явное инстанцирование 
+- Неявное инстанцирование компилятор проводит где захочет
+- Но вы можете взять точку инстанцирования под контроль 
+#+begin_src cpp
+template <typename T> T max(T x, T y) { return x > y ? x : y; }
+template int max<int>(int x, int y); // инстанцировать тут
+#+end_src
+- Здесь без template без скобок - это не специализация
+- Вы можете (и часто должны) также заблокировать инстанцирование в остальных модулях, указав, что оно уже проведено где-то еще
+#+begin_src cpp
+extern template double max<double>(double x, double y);
+#+end_src
+- При явном инстанцировании вы лишаетесь ленивого поведения.
+
+
+
+* Частичная специалиазация
+** Частичная специализация
+- Для классов доступна также возможность специализировать шаблон частично 
+#+begin_src cpp
+template <typename T, typename U> class Foo {}; // primary template
+template <typename T> class Foo<T, T> {};       // case T == U
+template <typename T> Foo<T, int> {};           // case U == int
+template <typename T, typename U> class Foo<T*, U*> {}; // case pointers
+#+end_src
+
+
+** Специализация по nontype параметрам
+- Нет никаких проблем в том, чтобы специализировать класс по любой разновидности шаблонных параметров
+#+begin_src cpp
+template <typename T, int N> class Array;
+template <typename T> class Array<T, 3> {
+    // тут более эффективная реализация для трех элементов
+#+end_src
+- Немного сложнее придумать разумный пример специализации по указателям и ссылкам
+- Частичную специализации по nontype параметрам никто не использует
+
+
+** Специализация для похожих типов
+- Частичная специализация возможна по семейству похожих типов
+#+begin_src cpp
+template <typename T> struct X;
+template <typename T> struct X<std::vector<T>>;
+X<int> a;              // -> primary template X<T>
+X<std::vector<int>> b; // -> X<std::vector<T>>
+#+end_src
+- Примерно так же можно специализировать для всех функций
+#+begin_src cpp
+template <typename R, typename T> struct Y;
+template <typename R, typename T> struct Y<R(T)>;
+#+end_src
+
+
+** Упрощение имен в специализациях
+- Внутри основного шаблона класса мы всегда можем сокращать имя
+#+begin_src cpp
+template <class T> class A {
+    А* a1; // A здесь означает A<T>
+};
+#+end_src
+- Это отлично работает также внутри частичной специализации
+#+begin_src cpp
+template <class T> class<T*> {
+    A* a2; // A здесь означает A<T*>
+};
+#+end_src
+- Разумеется указывать полные имена вполне легально (и часто лучше читается)
+
+
+* Unique pointers и частичные специализации 
+** Case study: unique_ptr
+- Расмотрим следующее использование unique_ptr
+#+begin_src cpp
+std::unique_ptr<int> ui{new int[1000]()}; // грубая ошибка
+#+end_src
+- В чем по вашему состоит грубая ошибка?
+- Можем ли мы добавить к чему то частичную специализацию, чтобы как-то предложить законный метод делать такие вещи?
+#+begin_src cpp
+std::unique_ptr<int[]> ui{new int[1000]()}; // хотелось бы так
+#+end_src
+- Хорошая ли идея добавлять частичную специализацию к самому классу unique_ptr?
+
+** Вспоминаем структуру unique_ptr
+- Если вспомнить структуру unique_ptr то мы бы хотели частично специализировать Dleter
+
+
+** Частичная специализация
+- На помощь приходит частичная специализация для массивов
+#+begin_src cpp
+template <typename T> struct default_delete {
+    void operator() (T *ptr) { delete ptr; }
+};
+template <typename T> struct default_delete<T[]> {
+    void operator() (T *ptr) { delete [] ptr; }
+};
+#+end_src
+- Теперь при массиво-подобном T у нас будет вызван правльный deleter
+
+
+
+
+
+* Специализации и LSP
+** Обсуждение
+- Можно ли шаблонную специализацию назвать разновидностью наследования?
+- В наследовании тоже более специализированный класс наследует более общему 
+
+
+** Нарушение LSP для шаблонов
+- Увы, но (частично) специализированный шаблон может не иметь ничего общего с его полной версией (вплоть до разных имен методов)
+- С точки зрения наследования это нарушение LSP
+#+begin_src cpp
+template <typename T> struct S { void foo(); };
+template <> struct S<int> { void bar(); };
+S<double> sd; sd.foo(); // primary template S<T>
+S<int> si; si.bar();    // specialization S<int>
+#+end_src
+- И, разумеется, шаблоны инварианты к шаблонной генерализации. Каждая специализация считается новым, не связанным с прочим, типом. 
+
+
+
+* Двухфазное разрешение имен
+** Постановка проблемы 
+- Должно ли разрешение имен в шаблонах (в том числе классов) происходить до инстанцирования или после?
+#+begin_src cpp
+template <typename T> struct Foo {
+    int use() { return illegal_name; }
+};
+#+end_src
+- Здесь illegal_name выглядит нелегальным именем, но может быть оно будет как-то легализовано после того как будет подставлен конкретный T?
+- Нужно ли выдавать ошибку сразу или подождать подстановки параметра?
+
+
+** Двухфазное разрешение имен
+- Первая фаза: до инстанцирования. Шаблоны проходят общую синтаксическую проверку, а также разрешаются независимые имена
+- Вторая фаза: во время инстанцирования. Происходит специальная синтаксическая проверка и разрешаются зависимые имена.
+- Зависимое имя - это имя, которое семантически зависит от шаблонного параметра. Шаблонный параметр может быть его типом, но может участвовать в формировании типа и так далее
+#+begin_src cpp
+template <typename T> struct Foo {
+    int use () { return illegal_name; } // независимое имя
+};
+
+template <typename T> struct Foo {
+    int use () { return T::illegal_name; } // зависимое имя, ок
+};
+#+end_src
+- Следует запомнить золотое правило: разрешение зависимых имен откладывается до подстановки шаблонного параметра 
+
+
+** Пример Вандерворда
+- Можем ли мы как то исправить ситуацию?
+#+begin_src cpp
+template <typename T> struct Base {
+    void exit();
+};
+template <typename T> struct Derived : Base<T> {
+    void foo() {
+        exit(); // Можно подумать, что это Base::exit(), но exit - не зависимое имя, так что нет.
+    }
+};
+#+end_src
+
+
+** Пример Вандерворда
+- Есть несколько способов сделать имя exit зависимым
+#+begin_src cpp
+this->exit();
+Base::exit(); // читается как Base<T>::exit();
+#+end_src
+- Это одно из немногих рациональных использований явного this
+#+begin_src cpp
+template <typename T> struct Derived : Base<T> {
+    void foo() {
+        this->exit(); // ага, мы стреляем в двухфазное разрешение
+#+end_src
+- Хочется еще раз призвать не использовать явный this нерационально.
+
+
+
+* Устранение неоднозначности
+** Зависимые имена типов
+- Зависимые имена типов могут вызвать неожиданные проблемы
+#+begin_src cpp
+struct S {
+    struct subtype {};
+};
+template <typename T> int foo (const T& x) {
+    T::subtype *y; // это умножение 
+    // и так далее
+}
+foo<S>(S{}); // казалось бы все хорошо?
+#+end_src
+- Здесь написано умножение поля T::subtype на глобальную перменную y, поэтому
+#+begin_src cpp
+typename T::fsubtype *y;
+#+end_src
+- Эта техника называется устранением неоднозначности (disambiguation)
+** Зависимые имена шаблонов 
+- Зависимые имена шаблонов также могут быть вызывать ножиданные проблемы
+#+begin_src cpp
+template <typename T> struct S {
+    template <typename U> void foo() {}
+};
+template <typename T> void bar() {
+    S<T> s; s.foo<T>(); // Это меньше
+}
+#+end_src
+- Тут, как вы думаете, что то не таак или все ок?
+- Без разрешения неодназначности первая треугольная скобка означала бы оператор меньше
+#+begin_src cpp
+S<T> s; s.template foo<T>();
+#+end_src
+** Зависимые имена 
+- Вместе:
+#+begin_src cpp
+typename T::template iterator<int>::value_type v;
+#+end_src
+
+
+* Cliffhanger
+** Обсуждение
+- Итак, для разрешения имен нужно иметь информацию о типах
+- Нельзя ли использовать эту информацию для вывода типов?
+** Обсуждение
+- Вернемся к примеру с функцией max
+#+begin_src cpp
+template <typename T> T max(T x, T y) { return x > y ? x : y; }
+...
+a = max<int>(2, 3); // порождает template<> int max(int, int)
+#+end_src
+- Компилятор видит тип int для литералов, поэтому его явное указание не нужно
+#+begin_src cpp
+a = max(2, 3); // тоже ок
+a = max(2, 3.0); // неоднозначность, вывод типов не сработает
+#+end_src
