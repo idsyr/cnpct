@@ -1,0 +1,531 @@
+#+title: Базовый курс C++ (MIPT, ILab). Lecture 17. Вывод типов и свёртка ссылок.
+#+author: idsyr
+
+
+
+* Вывод типов шаблонами
+** Обсуждение
+- Вернемся к примеру с функцией max
+#+begin_src cpp
+template <typename T>
+T max(T x, T y) { return x > y ? x : y; }
+... 
+a = max<int>(2, 3); // порождает template<> int max(int, int)
+#+end_src
+- Компилятор видит тип int для литералов, поэтому его явное указание не нужно
+#+begin_src 
+a = max(2, 3); // тоже ок
+a = max(2, 3.0); // неодназначность, вывод типов не сработает
+a = max<int>(2, 3.0); // тоже ок, мы помогли компилятору
+#+end_src
+
+
+
+** Неуточненные типы
+- По исторической традиции вывод неуточненного типа режет ссылки, константность и прочее
+#+begin_src cpp
+template <typename T>
+T max(T x, T y) { return x > y ? x : y; }
+const int &b = 1, &c = 2;
+a = max(b, c); // template<> int max<int>(int, int)
+#+end_src
+- Это сделано чтобы уменьшить число неоднозначностей
+#+begin_src cpp
+int e = 2; int &d = e; // вроде разные типы, но вывод рботает
+a = max(d, e);         // template<> int max<int>(int, int)
+#+end_src
+
+
+
+** Уточненные типы
+- Все меняется когда мы уточняем тип левой ссылкой или указателем
+#+begin_src cpp
+template <typename T> void foo(T& x);
+#+end_src
+- Теперь компилятор считает, что программисту виднее
+#+begin_src cpp
+const int x = 42;
+foo(x); // -> template<> void foo<const int>(const int& x)
+#+end_src
+- Интересно, что иногда вы вроде уточнили, а компилятор... срезал уточнение
+#+begin_src cpp
+template <typename T> void bar(const T x);
+bar(x); // -> template<> void bar(const T x)
+#+end_src
+- Особая статья это уточнение правой ссылокой, это мы пока отложим
+
+
+
+* Вывод конструкторами классов и хинты
+** Вывод конструкторами классов (С++17)
+- Начиная с С++17 конструкторы классов могут использоваться для вывода типов
+#+begin_src cpp
+template<typename T> struct container {
+    container(T t);
+    // и так далее
+};
+container c(7); // -> container<int> c(7);
+#+end_src
+- Внезапно будет работать также списочная инициализация но пока неясно как
+#+begin_src cpp
+std::vector v {1, 2, 3} // -> std::vector<int>
+#+end_src
+
+
+
+** Проблема: вывод через косвенность
+- Конструктор класса может быть шаблонным
+#+begin_src cpp
+template<typename T> struct container {
+    template<typename Iter> container(Iter beg, Iter end);
+    // и так далее
+}
+std::vector<double> v;
+container d(v.begin(), v.end()); // -> container<dluble>?
+#+end_src
+- Компилятор умен, но не настолько умен чтобы сходить в std::iterator_traits
+- Тут надо как то ему подсказать где искать value_type
+
+
+
+** Хинты для вывода (С++17)
+- Пользователь может помочь выводу в сложных случаях
+#+begin_src cpp
+tepmlate<typename T> struct container {
+    template<typename Iter> container(Iter beg, Iter end);
+    // и так далее
+};
+// Пользовательский хинт для вывода
+template<typename Iter> container(Iter b, Iter e) ->
+    container<typename interator_traits<Iter>::value_type>;
+
+std::vector<double> v;
+auto d = container(v.begin(), v.end()); // container<double>
+#+end_src
+
+
+** Вывод без конструктора
+- Агрегатное значение может и не иметь конструктора
+#+begin_src cpp
+template <typename T> struct NamedValue {
+    T value;
+    std::string name;
+};
+#+end_src
+- Тоже можно немного помочь компилятору
+#+begin_src cpp
+NamedValue(const char*, const char*) -> namedValue<std::string>;
+#+end_src
+- Теперь конструируем агрегат из двух строк
+#+begin_src cpp
+NamedValue n{"hello", "world"}; // -> NamedValue<std::string>
+#+end_src
+
+
+** Обсуждение
+- Мы хотим такой же гибкости и для локальных переменных?
+
+* Auto и decltype
+** Встречаем auto и decltype
+- Для локальных перменных ключевое слово auto работает по правилам вывода типов шаблонами
+#+begin_src cpp
+template <typename T> foo(T x);
+const int &t;
+foo(t); // -> foo<int>(int x)
+auto s = t; // -> int s
+#+end_src
+- Для точного вывода существует decltype
+#+begin_src cpp
+decltype(t) u = 1; // const int& u
+#+end_src
+
+
+** Категории выражений
+- Любое выражение в языке относится к одной из категорий:
+  - lvalue
+  - xvalue
+  - prvalue
+#+begin_src cpp
+int x, y;
+   x      = x + 1;
+// lvalue   prvalue
+   x      = x;
+// lvalue   lvalue to prvalue
+   y      = std::move(x);
+// lvalue   xvalue
+#+end_src
+- Есть две обобщающие категории: glvalue и xvalue
+
+
+** Четыре формы decltype
+- decltype существует в двух основных видах: для имени и для выражения
+- decltype(name) выводит тип с которым было обьявлено имя
+- decltype(expression) работает чуточку сложнее
+  - decltype(lvalue) это тип выражения + левая ссылка
+  - decltype(xvalue) это тип выражения + правая ссылка
+  - decltype(prvalue) это тип выражения
+- В итоге левые или правые ссылки встречаются в неожиданных местах 
+#+begin_src cpp
+int a[10]; decltype(a[0]) b = a[0] ; // -> int & b
+#+end_src
+- Это может выглядеть странно, но это логично - ссылка определяет lvalueness
+
+
+
+
+* Немного о сигнатурах функций
+** Проблема в С++11
+- Итак, мы в 2012 году и у нас нет auto для возвращаемого типа функций
+#+begin_src cpp
+template <typename T> auto //C++11 Error!
+makeAndProcessObject (const T& builder) {
+    auto val = builder.makeObject();
+    // что то делаем с val
+    return val;
+}
+#+end_src
+- Как написать эту функцию в реалиях 2012 года?
+
+
+** Попытка решения 
+- На самом деле эта проблема сохраняется в свежих версиях стандарта, но ее стало сложнее демострировать
+- Итак, мы в 2012 году и у нас нет auto для возвращаемого типа функций
+#+begin_src cpp
+template <typename T> decltype(builder.makeObject()) // Fail
+#+end_src
+- Это не работает, так как имя builder еще не введено в область видимости
+
+
+** Решение для С++11
+- Для решения используется так называемый расширенный синтаксис
+#+begin_src cpp
+int foo(); // обычный синтаксис
+auto foo() -> int; // расширенный синтаксис
+#+end_src
+- Использование очевидно
+#+begin_src cpp
+template <typename T>
+auto makeAndProcessObject(const T& builder) -> decltype(builder.makeObject()) {
+    auto val = builder.makeObject();
+    // что то делаем с val
+    return val;
+}
+#+end_src
+
+
+** Решение для С++14 и позднее
+- Для статического решения можно использовать нефиксированную сигнатуру
+#+begin_src cpp
+int  foo(); // функция с фиксированной сигнатурой
+auto foo(); // функция для которой возвращаемый тип выводится
+#+end_src
+- Использование также несложно
+#+begin_src cpp
+template <typename T> auto makeAndProcessObject(const T& builder) {
+    auto val = builder.makeObject();
+    // что то делаем с val
+    return val;
+#+end_src
+
+
+** Use before deduction
+- Бывают случаи когда такой вывод сбивается
+#+begin_src cpp
+auto bad_sum_to(int i) {
+    // use before deduction
+    return (i > 2) ? bad_sum_to(i-1) + i : i;
+}
+#+end_src
+- Для этой ошибки вовсе не обязательна рекурсия
+
+#+begin_src cpp
+auto func();
+int main() { func(); } // use before deduction
+auto func() { return 0; } // deduction
+#+end_src
+
+
+** Обсуждение
+- Кажется ли вам хорошей идеей нефиксированная сигнатура для внешних API, например для методов классов в общих хедерах?
+- Именно поэтому даже сейчас форма со стрелочкой используется когда мы не знаем как именно формируется тип
+#+begin_src cpp
+// фиксированная сигнатура если все внутри decltype известно 
+auto foo() -> decltype(some information);
+#+end_src
+- Бывает также абсурдное использование этой формы просто для красоты
+#+begin_src cpp
+auto main() -> int { return 42; } // ошибки тут нет, но... 
+#+end_src
+
+
+
+
+* Идиомы for-auto и AAA
+** Идиома for-auto
+- Обход итератором начиная с C++11 скрыт за for-auto идомой
+- Допустимый вариант
+#+begin_src cpp
+for(auto it = v.begin(), ite = v.end(); it != ite; ++it)
+    use(*it);
+#+end_src
+- Эквивалентный (почти эквивалентный) вариант
+#+begin_src cpp
+for(auto elt : v)
+    use(elt);
+#+end_src
+- Что если use берет ссылку? Первый вариант отдаст ссылку перевязав ее. Второй вариант, увы, срежет тип и, значит, скопирует значение
+
+
+** Обсуждение: ААА initializers
+- Предложенный Гербом Саттером принцип AAA состоит в том, чтобы делать любую инициализацию через auto
+#+begin_src cpp
+auto x = 1;
+auto y = 1u;
+auto c = Customer{"Jim", 42};
+auto p = v.cbegin();
+#+end_src
+- Начиная с С++17 он действительно работает(вспоминаем prvalue elision)
+#+begin_src cpp
+auto a = std::atomic<int>{9}; // ok только в C++17
+auto arr = std::array<int, 100>{}; // быстро с С++17
+#+end_src
+- Некоторая критика этого принципа основана на сложности чтения кода
+
+
+** Проблемы с ААА
+- Первое: не следует тянуть ААА в нестатические функции. Это идома только для инициализации локальных переменных
+#+begin_src cpp
+auto foo(int x); // non-fixed ABI (from C++14)
+int foo(auto x); // non-fixed ABI (from C++20)
+#+end_src
+- Второе: есть случаи когда это все еще не сработает
+#+begin_src cpp
+auto x = long long {42}; // FAIL
+auto x = static_cast<long long>(42); // ok, but...
+
+const int & foo();
+auto x = foo(); // decays
+auto x = static_cast<const int&>(foo()); // still decays
+#+end_src
+
+* Свертка ссылок
+** Вывод типов из ссылочных типов
+- Рассмотрим вывод типов с помощью auto
+#+begin_src cpp
+int x;
+int &y = x;
+auto &&d = move(y); // -> ???
+#+end_src
+- Уточненное с помощью rvalue reference, auto не может игнорировать ссылку
+- Формально вывод выглядит так:
+#+begin_src 
+auto &&c = y;       // -> int & && c = y;
+auto &&d = move(y); // -> int && && d = move(y);
+#+end_src
+- Чтобы получился корректный тип, ссылки должны быть свернуты (collapsed)
+
+** Правила свертки ссылок
+| Inner | Outer | Result |
+| T&    | T&    | T&     |
+| T&    | T&&   | T&     |
+| T&&   | T&    | T&     |
+| T&&   | T&&   | T&&    |
+- Левая ссылка выигрывает, если она есть
+- Для предыдущего примера это дает
+#+begin_src cpp
+auto &&c = y; // -> int &c = y;
+auto &&d = move(y) // -> int &&d = move(y);
+#+end_src
+- Правила вывода дают интересную картину: auto& это всегда lvalue ref, но auto&& это либо lvalue ref, либо rvalue ref(зависит от контекста)
+#+begin_src cpp
+auto &&y = x; // x это some& -> y это some&
+#+end_src
+
+
+** Универсальность ссылок
+- Правила вывода дают интересную картину: auto& это всегда lvalue ref, но auto&& это либо lvalue ref, либо rvalue ref(зависит от контекста)
+#+begin_src cpp
+int x;
+auto &&y = x; // ->int &y = x;
+#+end_src
+- Это в целом работает и для decltype и для шаблоннов (но для шаблонов есть одна техническая трудность)
+#+begin_src cpp
+decltype(x) && z = x; // int &z = x;
+template <typename T> void foo(T && t);
+foo(x); // foo<???>(int& t) как вы думаете, чему равен T?
+#+end_src
+- Такие ссылки называют forwading references или универсальными ссылками
+
+** Небольшое уточнение 
+- При сворачивании типов шаблонами мы должны также вывести тип шаблонного параметра
+#+begin_src cpp
+template <typename T> int foo(T&&);
+int x;
+const int y = 5;
+foo(x); // -> int foo<int&>(int&);
+foo(y); // -> int foo<const int&>(const int&)
+foo(5); // -> int foo<int>(int&&)
+#+end_src
+- Для консистентности он выводится в ссылку для lvalue но не для rvalue
+
+
+
+
+
+* Неуниверсальные ссылки
+** Неуниверсальные ссылки
+- Контекст сворачивания требует вывода типов, а не их подстановки
+#+begin_src cpp
+template<typename T> struct Buffer {
+    void emplace(T&& param); // здесь T подставляется
+template<typename T> struct Buffer {
+    template<typename U>
+    void emplace(U&& param); // здесь U выводится
+#+end_src
+- Контекст для сворачивания не будет создан, если тип уточнен более, чем &&
+#+begin_src cpp
+const auto &&x = y; // никакого сворачивания ссылок
+template<typename T> void buz(const T&& param); // аналогично
+#+end_src
+
+
+
+
+* Снова for-auto и AAARR
+** Идиома for-auto&&
+- Теперь мы знаем ответ на поставленный ранее вопрос
+- Допустимый вариант
+#+begin_src cpp
+for(auto elt : v)
+    use(elt);
+#+end_src
+- Куда лучший вариант
+#+begin_src cpp
+for(auto && elt : v) // elt это T& или T&&
+    use(elt);
+#+end_src
+- Он лишен недостатков, которые мы замечали ранее
+
+
+** Обсуждение: AAARR
+- Almost Always Auto Ref Ref это расширение идомы AAA, отлично справляющееся с большинством случаев
+#+begin_src cpp
+auto&& y = 1u;
+auto&& c = Customer{"Jim", 42};
+auto&& p = v.cbegin();
+const int& foo();
+auto&& f = foo(); // ok, const int& inferred
+#+end_src
+- Что вы думаете про AAARR?
+
+
+* Прозрачная оболочка и decltype(auto)
+** Прозрачная оболочка
+- Представим теоретическую задачу сделать функцию максимально "прозрачной", то есть пробрасывающей свои аргументы без расходов
+#+begin_src cpp
+template <typename Fun, typename Arg>
+??? transparent(Fun funn, Arg arg) {
+    return fun(arg);
+}
+#+end_src
+- Начнем с простейшего вопроса: что она возвращает?
+- Функция может возвращать как правую, так и левую ссылку
+
+
+** Знакомимся: decltype(auto)
+- Совмещает лучшие стороны двух механизмов вывода
+- Вывод типов является точным, но при этом выводится из всей правой части
+#+begin_src cpp
+double x = 1.0;
+decltype(x) tmp = x; // два раза x не нужен
+decltype(auto) tmp - x; // это именно то что нужно
+#+end_src
+- Однако что стоит справа expr или id-expr? Зависит от выражения...
+#+begin_src cpp
+decltype(auto) tmp = x;   // -> double 
+decltype(auto) tmp = (x); // -> double&
+#+end_src
+
+
+* Совершенный проброс и std::forward
+
+** Прозрачная оболочка
+- Кажется для прозрачной оболочки это идеально подойдет
+#+begin_src cpp
+template <typename Fun, typename Arg> decltype(auto)
+transparent
+(Fun fun, Arg arg)
+{return fun(arg);}
+#+end_src
+- Увы, ее недостаток теперь в том, что она не слишком прозрачна
+#+begin_src cpp
+Buffer b;
+Buffer t = transparent(&foo, b); // тут явное копирование b
+#+end_src
+
+** Снова прозрачная оболочка
+- Возможный выход: сделать аргумент ссылкой
+#+begin_src cpp
+(Fun fun, Arg& arg)
+#+end_src
+- Но появляется новая беда: теперь rvalues не проходят в функцию
+#+begin_src cpp
+extern Buffer foo(Buffer x);
+Buffer b;
+Buffer t = transparent(&foo, b); // ok
+Buffer u = transparent(&foo, foo(b)) // ошибка компиляции
+#+end_src
+
+** Снова прозрачная оболочка
+- Возможный выход: перегрузить по константной ссылке
+#+begin_src cpp
+(Fun fun, Arg& arg) 
+(Fun fun, const Arg& arg)
+Buffer u = transparent(&foo, foo(b)); // ok, но копируется
+#+end_src
+- Но есть проблемы:
+- Всего 10 аргументов потребуют 1024 перегрузки
+- Вызов для rvalue все еще требует копирования
+
+** Снова прозрачная оболочка
+- Решение для первой проблемы: универсализировать ссылку
+#+begin_src cpp
+(Fun fun, Arg&& arg)
+#+end_src
+
+
+** Чего бы нам хотелось
+- Решения для второй проблемы: условное перемещение
+#+begin_src cpp
+if(arg это rvalue) return fun(move(arg))
+else               return fun(arg) 
+#+end_src
+
+
+** Решение: использовать std::forward
+#+begin_src cpp
+    return foo(std::forward<Arg>(arg));
+#+end_src
+- Это называется perfect forwarding и бывает удивительно полезной идомой
+- Три главных состовляющих: контекст вывода T, тип T&& и std::forward<T>
+- Кажется безумием? Вот пример использования:
+
+
+** Обсуждение: emplace
+- Что если мы пробросим аргументы для конструктора
+#+begin_src cpp
+MyVector<Heavy> vh;
+vh.push(Heavy{100}); // создает, потом перемещает
+vh.emplace(100);     // пробрасывает, создаст на месте 
+#+end_src
+- Это может очень существенно сократить количество операций
+- Внезапно настоящий std::vector это умеет и более того, умеет принимать произвольное количество аргументов конструктора
+- Но об этом и многом другом в следующий раз
+
+
+* Обзор литературы и cliffhanger
+- Допишем emplace
+- Масса усилий на решение проблемы с конструктором из двух итераторов
+
+
+
