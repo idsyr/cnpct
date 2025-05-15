@@ -50,9 +50,9 @@ foo(x); // -> template<> void foo<const int>(const int& x)
 - Интересно, что иногда вы вроде уточнили, а компилятор... срезал уточнение
 #+begin_src cpp
 template <typename T> void bar(const T x);
-bar(x); // -> template<> void bar(const T x)
+bar(x); // -> template<> void bar<int>(int x)
 #+end_src
-- Особая статья это уточнение правой ссылокой, это мы пока отложим
+- Особая статья это уточнение правой ссылкой, это мы пока отложим
 
 
 
