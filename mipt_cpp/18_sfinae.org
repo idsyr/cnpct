@@ -1,0 +1,527 @@
+#+title: Базовый курс C++ (MIPT, ILab). Lecture 18. Определители типов и SFINAE
+#+author: idsyr
+
+
+* Разбор домашнего задания
+- Copy constructor для rb_tree для строгой гарантии исключений может создавать временный обьект и в конце std::move()
+- insert который делает несколько задач в одном цикле -> разбить
+
+
+* Требования к контейнерам
+** От ручного выделения к векторам
+#+begin_src cpp
+int * n = new int[10];
+n[5] = 5;
+// тут много кода
+// какой сейчас размер у n?
+// стереть крайний элемент?
+// пуст ли теперь n?
+// не забыть delete[]
+#+end_src
+
+#+begin_src cpp
+vector<int> v(10);
+v[5] = 5;
+// тут много кода
+size_t vsize = v.size();
+v.pop_back();
+if(v.empty()) { /* что то */ }
+// ресурсы будут освобождены
+#+end_src
+- + амортизация сложности операций
+- + реалокация
+- + копирование, перемещение
+
+** Два непростых вопроса (Требования к элементам и интерфесу)
+- Допустим я хочу завести в своей программе вектор из константных ссылок
+#+begin_src cpp
+std::vector<const int &> v;
+#+end_src
+- Что скажете?
+- Допустим я не знаю тип переменной x, но знаю, что это контейнер
+#+begin_src cpp
+template <typename Cont> void foo(const Cont& x)
+{  if(x.empty()) return;
+   // do smth
+}
+#+end_src
+- Могу ли я быть уверенным, что это будет работать для всех контейнеров?
+
+
+** Требования к элементам контейнеров
+- Общие для всех контейнеров методы [container.requirements.general]
+  - empty
+  - swap
+  - size
+  - clear
+  - begin, end, cbegin, cend
+- Требования к элементам зависят от конкретной операции, но чаще всего 
+  - DefaultContructible - требование к наличию конструктора по умолчанию
+  - MoveContructible - требование к наличию конструктора перемещения или копирования
+- Инстанцирование работает лениво, поэтому список требований к инстанцированию это требования к операциям (элементам?)
+
+** Гаранитии непрерывности памяти
+// функция init написана в старом стиле 
+#+begin_src cpp
+template <typename T> void init (T * arr, size_t size)
+#+end_src
+- Но ее можно использовать с векторами
+#+begin_src cpp
+vector<T> t(n);
+T * start = &t[0];
+init_t(start, n);
+assert(t[1] == start[1]);
+#+end_src
+
+** Неприятное исключение: vector<bool>
+#+begin_src cpp
+vector<bool> t(n);
+bool * start = &t[0]; // это не скомпилируется, но представим
+assert(t[1] == start[1]); // oops!
+#+end_src
+- Важно запомниь две вещи
+  - vector<bool> не удовлетворяет соглашениям контейнера vector
+  - vector<bool> не содержит элементов типа bool
+- Не используйте vector<bool> для обобщенного программирования
+using vector_bool = vector<bool>;
+vector_bool x(10); // условно ok, но тут лучше std::bitset 
+
+
+* Работа с памятью и амортизация
+
+** Задача: что можно здесь улучшить?
+#+begin_src cpp
+vector<int> v;
+for (int i = 0; i != N; ++i)
+    v.push_back(i);
+#+end_src
+** Ответ: вектор не терпит халатности
+#+begin_src cpp
+vector<int> v;
+v.reserve(N);
+for(int i = 0; i != N; ++i)
+    v.push_back(i); // теперь здесь не будет перевыделений
+#+end_src
+- При вставке в конец вектору могут потребоваться раллокации памяти
+- Это означает, что всегда полезно думать о памяти вектора не меньше, чем о памяти динамического массива 
+
+** Еще про size и capacity
+- size это сколько элементов у вектора уже есть
+- capacity это сколько элементов в нем может быть до первого перевыделения
+#+begin_src cpp
+vector<int> v (10000);
+assert(v.size() == 10000);
+assert(v.capacity() >= 10000);
+#+end_src
+- Размер это что то чем можно управлять в явном виде в отличии от емкости
+#+begin_src cpp
+v.resize(100);
+assert(v.size() == 100);
+assert(v.capacity() >= 10000);
+#+end_src
+- shrink_to_fit
+
+** Амортизация
+- При написании метода push, вам предлагалось оценить его алгоритмическую сложность
+- Проблема в том, что она очевидно O(1) если не надо реаллоцировать и O(n) если надо
+- То есть мы платим иногда. Это примерно как купить машину и платить только за бензин пока машина не износиться, а потом купить новую
+- В экономике распределение стоимости товара по стоимости его периода эксплуатации называетс амортизацией товара
+- Амортизированное O(n) обозначается O(n)+
+
+** Амортизированная стоимость
+- По определению амортизированная стоимость операции это стоимость N операций, отнесенная к N
+- Для динамического массива Ci = 1 + [realloc] * (i - 1)
+- Амортизированная стоимость одной вставки будет sum(i)Ci/N для N вставок
+- Допустим, мы, если реаллиокация нужна, растим массив на 10 элементов sum(i)Ci = N + sum(N/10, k = 1)1 * k = O(N^2)
+- Заметим, что это очень плохая стратегия. Амортизированная сложность push будет O(N^2)/N = O(N)+.
+- В требованиям к контейнерам в частности есть амортизированная сложность. Для push O(1)+
+- Можем ли мы придумать и доказать нечто лучшее?
+
+** Лучшая стратегия
+- Прирост вдвое
+- sum(i = 0 -> N)Ci / N = N + sum(j = 1 -> N) 2^j / N = O(N) / N = O(1)+
+- Видно что разница есть: при одной стратегии у нас в среднем линейное а при другой в среднем постоянное время вставки
+- Увы взять сумму sum(j = 1 -> lg(N)) 2^j в общем уже не так просто, а при более сложных стратегиях, это становиться мучительно
+- Можем ли мы упросить себе жизнь?
+
+** Дополнение: метод потенциала
+- Выберем функцию потенциала Ф(n) так, чтобы Ф(0) = 0, Ф(n) => 0
+- Здесь n это номер шага
+- Амортизированная стоимость это стоимость плюс изменение потенциальной функции Cn + Ф(i) - Ф(i - 1)
+- Выбор потенциальной функции облегчает вычисления потому что
+#+begin_src txt
+sum(i = 0 -> N)(Ci + Ф(i - 1)) = 
+    Ф(0) + sum(i = 0 -> N)(Ci) => sum(i = 0 -> N)(Ci)
+#+end_src
+- Удачный выбор сделает выражение sum(i = 0 -> N)(Ci + Ф(i - 1)) проще чем sum(i = 0 -> N)(Ci)
+- Обсуждение: как выбрать для массива? 
+
+
+** Доплнение: метод потенциала
+- Для массива поскольку при реаллокации вдвое 2 * Sn => Cn
+- Ф(n) = 2 * Sn - Cn
+- Без реаллокации: 
+- Ci + Ф(i) - Ф(i - 1) = 1 + (2 * Si - C) - (2 * Si-1 - C) = 1 + 2(Si - Si-1)) = 3
+- C реаллокацией:
+- Ф(i - 1) = 2k - k = k, Ф(i) = 2(k + 1) - 2k = 2
+- Ci + Ф(Ti) - Ф(i-1) = (k+1) + 2 - k = 3
+- В итоге в любом случае sum(Ci) <= 3N и мы доказали асимптотику O(1)
+
+
+** Обсуждение 
+- Выбор простого роста вдвое не всегда лучшая стратегия
+- Реальная стратегия из libstdc++ несколько сложнее и обладает рядом приятных теоретических свойств
+#+begin_src cpp
+const size_type __len = size() + std::max(size(), __n);
+#+end_src
+- Попробуйте дома проанализировать эту стратегию и обосновать почему она выбрана в качестве основной
+
+
+
+* Списки инициализации
+** Два механизма инициализации
+- Расширенный синтаксис (если нет из списка)
+- Явный конструктор из списка инициализации 
+#+begin_src cpp
+class B {
+    int a_;
+public:
+    B (int a) : a_(a) {}
+    B (std::initializer_list<int> il);
+};
+B b(1), c{1}; // теперь они вызывают разные конструкторы
+#+end_src
+
+
+** Списочная инициализация: вектора
+#+begin_src cpp
+// это вектор [14 14 14]
+vector<int> v1 {3, 14};
+// а это вектор [3 14]
+vector<int> v2 {3, 14};
+#+end_src
+- Это связано с наличием у вектора нескольких конструкторов
+#+begin_src cpp
+v(10); // размер 10, инициализация по умолчанию
+v(10, 1); // размер 10, инициализировать единицами
+v{10, 1}; // размер = размеру списка, инциализация списком 
+#+end_src
+
+
+** То же для ваших контейнеров
+- Хорошая новость: initializer_list это тоже разновдиность последовательного контейнера и его можно обходиь итераторами
+#+begin_src cpp
+template <typename T> class Tree {
+    // тут какая то специфика дерева
+    bool add_node (T& data);
+public:
+    Tree(std::initializer_list<T> il) {
+        for (auto ili = il.begin(); ili != il.end(); ++ili)
+            add_node(*ili);
+    }
+}
+#+end_src
+- Плохая новость: вам теперь надо следить есть ли он в классе -> ведь семантика фигурных скобок меняется
+
+
+** Простое правило для {}
+- Если в классе совсем нет конструкторов, это агрегат как в С
+#+begin_src cpp
+struct S { int x, y; }; 
+S s = {1, 2}; // agregate
+#+end_src
+- Иначе, если есть конструктор из initializer_lsit, возьмется он
+- Иначе, если есть любой другой конструктор, возьмется он
+#+begin_src cpp
+struct S {
+    int x, y;
+    S(int n) : x(n), y(n) {}
+};
+S s = {3}; // ctor
+#+end_src
+
+
+
+* Проблема конструирования из пары итераторов
+** Первое представление об итераторах
+#+begin_src cpp
+vector<int> v(10);
+// pi это указатель
+auto pi = &v[0];
+pi += 3;
+assert(*pi == v[4]);
+// как узанть что pi в конце?
+#+end_src
+
+#+begin_src cpp
+vector<int> v(10);
+// vi это итератор
+auto vi = v.begin();
+vi += 3;
+assert(*vi == v[4]);
+if(vi == v.end()) { /* smth */ }
+#+end_src
+- Думать как о: обобщенный указатель
+
+** Абстракция указателя
+- Важно, что итераторы не являются указателсями, они абстрагируют их
+- В итоге любой контейнер может быть сконструирован из любого диапазона
+#+begin_src cpp
+std::list<int> l {1, 2, 3};
+std::vector<int> v(l.begin(), l.end());
+#+end_src
+- Это потрясающе удобно чтобы перекидывать один контейнер в другой
+- Как бы вы написали конструкор из пары итераторов?
+
+
+** Конструирование из итераторов
+- Наивная попытка вызывает у нас небольшую проблему
+#+begin_src cpp
+template <typename T> class MyVector {
+    // ...
+public:
+    MyVector (size_t nelts, T value); // 1
+    template <typename Iter> MyVector (Iter fst, Iter lst); // 2
+    // ...
+    MyVector<int> mvec (2, 2); // ошибка, выбран 2
+}
+#+end_src
+- Короткий путь выглядит вот так:
+#+begin_src cpp
+#include <concepts>
+// ...
+template <typename Iter>
+requires forward_iterator<Iter>
+MyVector(Iter fst, Iter lst);
+#+end_src
+
+
+* SFINAE
+** Обсуждение: провал подстановки
+- Что если подстановка в некотором контексте не может быть выполнена?
+#+begin_src cpp
+template<typename T>
+typename T::ElementT at(T const& a, int i);
+int *p = new int[30];
+auto a = at<int*>(p, i); // Substitution failure
+#+end_src
+- Что если вывод типов в некотором контексте провален?
+#+begin_src cpp
+template <typename T> T max(T a, T b);
+int g = max(1, 1.0); // Deduction failure
+#+end_src
+
+
+** SFINAE 
+- Substitution Failure Is Not An Errror 
+- Провал подстановки не является ошибкой
+#+begin_src cpp
+template <typename T> T max(T a, T b);
+template <typename T, typename U> auto max (T a, U b);
+int g = max(1, 1.0); // подстановка в 1 провален
+                     // подстановка в 2 успешна
+#+end_src
+- Если в результате подстановки в непосредственной контексте класса (функции, алиаса, переменной) возникает невалидная конструкция, эта подстановка неуспешна, но не ошибочна
+- В этом случае второй фазы поиска имен просто не выполняется
+
+
+** SFINAE и ошибки
+- Не любая ошибочная конструкция это SFINAE. Важен контекст подстановки
+#+begin_src cpp
+int negate (int i) { return -i; }
+template <typename T> T negate(const T& t) {
+    typename T::value_type n = -t();
+    // тут используем n
+}
+negate(2.0); // ошибка второй фазы
+#+end_src
+- Здесь в контексте сигнатуры и шаблонных параметров нет никакой невалидности
+- контекст это грубо говоря declaration
+#+begin_src cpp
+template <typename T> T::value_type negate(const T& t) {
+    typename T::value_type n = -t();
+    // тут используем n
+}
+negate(2.0); // substitution failure
+#+end_src
+- Здесь в контексте сигнатуры и шаблонных параметров выводится -> double и разумеется T::value_type невалидно
+
+
+** Обсуждение 
+- Техника SFINAE кажется очень простой, но вообще то ее приложения многочислены и часто очень нетривиальны
+- Рассмотрим задачу: у нас есть два типа и вам нужно определить равны ли они
+#+begin_src cpp
+template <typename T, typename U> int foo() {
+    // как вернуть 1 если T == U и 0 если нет?
+}
+#+end_src
+- Обратим внимание, что это задача отображения из типов на числа
+- Прежде чем ее решать, решим обратную задачу
+
+
+* Интегральные константы и определители типов
+** Интегральные константы
+- Отображение из целых числе на типы называется интегральной константой
+#+begin_src cpp
+template <typename T, T v> struct integral_constant {
+    static const T value = v;
+    typedef T value_type;
+    typedef integral_constant type;
+    operator value_type() const {return value;} // конструктор из инта наоборот
+}
+#+end_src
+- Возможна даже арифметика
+#+begin_src cpp
+using ic6 = intergal_constatnt<int, 6>;
+auto n = 7 * ic6{};
+#+end_src
+
+** Истина и ложь для типов
+- Самые полезные из интегральных констант - самые простые
+#+begin_src cpp
+using true_type = integral_constant<bool, true>;
+using false_type = integral_constant<bool, false>;
+#+end_src
+- Все это есть в стандарте std::integral_constant 
+- Попробуем написать простой определитель, чтобы проверить одинаковые ли два типа
+#+begin_src cpp
+template <typename T, typename U>
+struct is_same : std::false_type {};
+#+end_src
+- По умолчанию разные. Что дальше?
+
+** Равенство типов
+- Теперь можно решить задачу определения равенства типов
+#+begin_src cpp
+template <typename T, typename U>
+struct is_same : std::false_type {};
+
+template <typename T>
+struct is_same <T, T> : std::true_type {} // для Т == Т
+
+template<typename T, typename U>
+using is_same_t = typename is_same<T, U>::type;
+#+end_src
+- Благодаря SFINAE, будет работать
+#+begin_src cpp
+assert(is_same<int, int>::value && !is_same<char, int>::value)
+#+end_src
+- Эти штуки гуляют по три, sfinae триады
+
+** Определители и модификаторы
+- Определитель: является ли тип ссылкой
+#+begin_src cpp
+template <typename T> struct is_reference : false_type {};
+template <typename T> struct is_reference<T&> : true_type {};
+template <typename T> struct is_reference<T&&> : true_type {};
+#+end_src
+- Модификатор: убираем ссылку с типа, если cсылки не было, то оставляем тип
+#+begin_src cpp
+template <typename T> struct remove_reference { using type = T; };
+template <typename T> struct remove_reference<T&> { using type = T; };
+template <typename T> struct remove_reference<T&&> { using type = T; };
+#+end_src
+Для модификатора полезен алиас
+#+begin_src cpp
+template <typename T>
+using remove_reference_t = typename remove_reference<T>::type;
+#+end_src
+
+** Четырнадцать категорий
+- Любой тип в языке С++ попадает хотя бы под одну из перечисленных ниже категорий
+#+begin_src cpp
+is_void
+is_null_pointer
+is_integral, is_floating_point // для Т и для cv T& транзитивно
+is_array // только втроенные. не  std::array
+is_pointer // включая указатели на обычные функции
+is_lvalue_reference, is_rvalue_reference
+is_member_object_pointer, is_member_function_pointer
+is_enum, is_union, is_class
+is_function
+#+end_src
+- Использование довольное тривиально
+#+begin_src cpp
+std::cout << std::boolalpha << std::is_void<T>::value << '\n';
+#+end_src
+
+
+** Свойства типов
+- Также очень полезны определители свойств типов
+#+begin_src cpp
+is_trivially_copyable // побайтово копируемый, memcpy
+is_standard_layout // можно адресовать поля указателем
+is_aggregate // доступна агрегатная инициализация как в С
+is_default_constructible // есть default ctor
+is_copy_contructible, is_copy_assignable
+is_move_contructible, is_nothrow_move_contructible
+is_move_assignable
+is_base_of // B является базой (транзитивно, включая сам тип)
+is_convertible // есть преобразования из А к В
+#+end_src
+- И многие другие (их реально десятки)
+
+* Проблемы и решения std::copy
+** Обсуждение: std::copy
+#+begin_src cpp
+template <typename InpIter, typename OutIter>
+OutIter cross_copy(InpIter fst, InpIter lst, OutIter dst) {
+    while(fst != lst ) {&dst = *fst; ++fst; ++dst;}
+    return dst;
+}
+#+end_src
+- Увы, по сравнению с настоящим std::copy у него есть проблемы
+- Можем ли мы их решить с помощью SFINAE?
+
+** Решение проблемы std:copy
+- Заведем хелпер и его специализацию для true
+#+begin_src cpp
+template<bool Triv, typename In, typename Out> struct CpSel {
+    static Out select(In begin, In end, Out out)
+        { return CopyNormal(begin, end, out); }
+};
+template <typename In, typename Out>
+struct CpSel<true, In, Out> {
+    static Out select(In begin, In end, Out out)
+        { return CopyFast(begin, end, out); } // для простых типов
+};
+#+end_src
+- Теперь сам алгоритм копирования будет просто решать кого он вызывает
+
+** Решение проблемы std::copy
+- Также тривиально мы решаем проблему с копированием
+#+begin_src cpp
+template <typename In, typename Out>
+Out realistic_copy(In begin, In end, Out out) {
+    using in_type = pointee type (In); // как это написать ?
+    using out_type = pointee type (Out);
+    
+    enum { Sel = std::is_trivially_copyable<in_type>::value &&
+                 std::is_trivially_copyable<out_type>::value &&
+                 std::is_same<in_type, out_type>::value };
+    return CpSel<Sel, In, Out>::select(begin, end, out);
+}
+#+end_src
+- Это написать вот так:
+#+begin_src cpp
+using in_type = typename std::iterator_traits<In>::value_type;
+using out_type = typename std::iterator_traits<Out>::value_type;
+#+end_src
+
+** INVIM
+
+** Обсуждение
+- Теперь единственным облачком на горизонте остался emplace
+#+begin_src cpp
+struct S {
+    S();
+    S(int, double, int);
+};
+std::vector<S> v;
+v.emplace_back(1, 1.0, 2); // создали на месте
+#+end_src
+- Но как это может работать для любого типа, если мы в общем случае не знаем количество аргументов конструктора?
+
+
+* Домашнее задание HWG и литература
+
