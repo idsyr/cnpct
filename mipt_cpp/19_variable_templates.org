@@ -1,0 +1,415 @@
+#+title: Базовый курс C++ (MIPT, ILab). Lecture 19. Вариабельные шаблоны.
+#+author: idsyr
+
+
+* Пачки параметров
+** Обсуждение
+- Теперь единственным облачком на горизонте остался emplace
+#+begin_src cpp
+struct S {
+    S();
+    S(int, double, int);
+};
+std::vector<S> v;
+v.emplace_back(1, 1.0, 2); // создали на месте
+#+end_src
+- Но как это может работать для любого типа, если мы в общем случае не знаем количество аргументов конструктора?
+
+** Вариабельные шаблоны
+- Пример вариабельно шаблонной функции
+#+begin_src cpp
+template <typename ... Args> void f(Args ... args);
+#+end_src
+- Способы вызова:
+#+begin_src cpp
+f(); // ок, пачка не содержит аргументов
+f(1); // ок, пачка содержит один аргумент: int
+f(2, 1.0); // ок, пачка состоит из: int, double
+#+end_src
+- Специальная конструкция sizeof...(Args) либо sizeof...(args) возвращает размер пачки в штуках 
+
+* Паттерны раскрытия
+** Паттерны раскрытия
+- Говорят, что пачка параметров "раскрывается" в теле функции или класса
+#+begin_src cpp
+template <typename ... Types> void f(Types ... args);
+template <typename ... Types> void g(Types ... args) {
+    f(args ...); // -> f(x, y);
+    f(&args ...); // -> f(&x, &y);
+    f(h(argc) ...); // -> f(h(x), h(y));
+    f(const_cast<const Types *>(&args)...); // -> f(const_cast<const int *>(&x), consts_cast<const double *>(&y));
+}
+g(1, 1.0); // -> g(int x, double y);
+#+end_src
+
+** Задача раскрытия
+- Допустим args это пачка параметров x, y, z
+- Тогда следующее выражение имеет сложный паттерн раскрытия пачки
+#+begin_src cpp
+f(h(args...) + h(args)...); // -> f(h(x, y, z) + h(x), h(x, y, z) +h(y) + ...);
+#+end_src
+- Анологично (если чувствовать технологию, эти задачи однообразны
+#+begin_src cpp
+f(h(args, args...)...); // -> 
+#+end_src
+
+* Снова прозрачная оболочка
+** Снова прозрачная оболочка
+- На лекции по rvalue refs написана почти идеальная прозрачная оболочка для одного аргумента
+#+begin_src cpp
+template <typename Fun, typename Arg>
+decltype(auto) transparent(Fun fun, Arg&& arg) {
+    return fun(forward<Arg>(arg));
+}
+#+end_src
+- decltype(auto) выручит в плане прозрачности а auto подветет -> функция возаращает int&, или функция возвращает int&&
+- Arg lvalue -> lvalue, rvalue -> rvalue (referencing collapsing)
+- arg -> int,   forward -> move (может быть и такой случай -> это typename)
+- arg -> int&&, forward -> move
+- arg -> int&,  forward -> nothing
+
+- Можно ли использовать вариабельный шаблон и переписать ее для произвольного количества аргументов? 
+** Снова прозрачная оболочка
+#+begin_src cpp
+template <typename Fun, typename... Arg>
+decltype(auto) transparent(Fun fun, Arg&&... arg) {
+    return fun(forward<Arg>(arg)...);
+}
+#+end_src
+- Это очень простое и чисто техническое изменение
+- Следует обратить особое внимание на паттерн совместного раскрытия при пробросе
+
+** Обсуждение: пробросим функцию?
+- В функцие-подобном обьекте оператор вызова может быть && аннотирован
+#+begin_src cpp
+template <typename Fun, typename... Args>
+decltype(auto) transparent(Fun&& fun, Args&&... args) {
+    return std::forward<Fun>(fun)(std::forward<Args>(args)...);
+}
+#+end_src
+- Теперь функции тоже не требуется быть обязательно копируемой
+- Выглядит это чуть страшнее, зато теперь тут не к чему особо придраться
+
+
+* Emplace
+** Контейнеры тяжелых классов
+- Мы уже говорили о хранении тяжелых классов в контейнерах
+#+begin_src cpp
+template <typename T> class Stack {
+    struct StackNode {
+        T elem; StackNode *next;
+        StackNode(T e, StackNode *nxt) : elem (e), next (nxt) {}
+        };
+public:
+    void push(const T& elem) { top_ = new StackNode (elem, top_); }
+#+end_src
+- Подумаем о следующем коде:
+#+begin_src cpp
+s.push(Heavy(100, 200, 300)); // Все очень плохо
+#+end_src
+- если делать definition во вне то template нужно делать дважды 
+
+** Emplace 
+- Обычно метод контейнера, который размещает обьект, а не пробрасывает его называют emplace
+#+begin_src cpp
+template <typename T> class Stack {
+    // детали реализации
+public:
+    void push(const T& elem) { top_ = new StackNode (top_, elem); }
+template <typename U> void emplace(U&& ... args) {
+    top_ = new StackNode(top_, forward<U>(args)...);
+}
+#+end_src
+- В стандартной библиотеке размещение поддерживают все последовательные контейнеры
+
+* Шаблонные методы и ООП
+** Интерлюдия: шаблонные методы
+- Шаблонный метод вне класса определяется с двумя набормаи параметров: своими и своего класса
+#+begin_src cpp
+template <typename T>
+template <typename... Args>
+void Stack<T>::emplace_back(Args &&... args) {
+    top_ = new StackElem(top_, std::forward<Args>(args)...);
+}
+#+end_src
+- Это не опечатка. Каждый набор идет отдельно
+- Все наборы совокупно участвуют в template-id и это важно для специализации 
+
+** Специализация шаблонных методов
+- При специализации шаблонных методов, важно понимать: вы должны специализировать их по всем аргументам
+#+begin_src cpp
+template <typename T> struct Foo {
+    template <typename U> void foo() 
+        { /* ... */ }
+};
+template <>
+template <>
+void Foo<int>::foo<int>() { /* ... */ }
+#+end_src
+- Иначе это будет частичная специализация
+
+** Шаблонные методы против ООП
+- Вы должны понимать, что любой открытый шаблонный метод в вашем классе обнуляет инкапсуляцию 
+#+begin_src cpp
+class Foo {
+    int donottouch_ = 42;
+public:
+    template <typename U> void foo() { /* ... */ }
+};
+struct MyTag {};
+template <> void Foo:foo<MyTag>() { donottouch_ = 14; }
+#+end_src
+
+** Обсуждение
+- Тем не менее пока что смы не очень понимаем как использовать SFINAE, пусть даже с вариабельными шаблоннами, для решения проблемы с конструктором из пары итераторов
+- /Настало время этим занятся/
+
+* void_t и проверка существования
+** void_t
+- Появился в С++ 17 как std::void_t но вообще то довольно прост
+#+begin_src cpp
+template <typename...> using void_t = void;
+#+end_src
+- Интуитивно void_t <T, U, V> означает если все типы легальны и нелегален если нелегален хоть один
+- Думайте о нем как о логической коньюнкции SFINAE характеристик
+
+** Задача: зависимый тип
+- С ранних пор была замечена полезность техники SFINAE для трюков и хаков. Классический пример: опеределить наличие зависимого типа в классе 
+#+begin_src cpp
+struct foo {typedef float foobar; };
+struct bar { };
+std::cout << std::boolalpha << ??? foo << " " << ??? bar;
+#+end_src
+- Это снова отображение из типов в целые и без sfinae, задача опять выглядит не решаемой
+
+** Решение: void_t 
+- Решение использует SFINAE и void_t
+#+begin_src cpp
+template <typename, typename = void>
+struct has_typedef_foobar: std::false_type { };
+
+template <typename T>
+struct has_typedef_foobar<T, std::void_t<typename T::foobar>>: std::true_type{};
+#+end_src
+- Теперь мы можем определить вещи на этапе компиляции
+#+begin_src cpp
+struct foo {typdef float foobar; }
+std::cout << std::boolalpha << has_typedef_foobar<foo>{};
+#+end_src
+
+** Конструирование из итераторов
+- Можно попытаться решить задачу с итератороми вот так
+#+begin_src cpp
+MyVector(size_t nelts, T value);
+template <typename Iter, 
+          typename = void_t<decltype(*Iter{}), decltype(++Iter{})>>
+MyVector(Iter fst, Iter lst); 
+#+end_src
+- Увы это не слишком изящно. Дело в том, что инкремент требует lvalue
+- Но его то мы как раз пока и не можем создать. Хотя иногда везет
+
+* declval и настоящее решение
+** Абстракция значения
+- В некоторых случаях (например для использования внутри decltype) хочется получить значение некоего тип
+- Часто для этого используется конструктор по умолчанию
+#+begin_src cpp
+template <typename T> struct Tricky {
+    Tricky() = delete;
+    const volatile T foo ();
+};
+decltype(Tricky<int>().foo()) t; // ошибка
+#+end_src
+- Но что делать, если его нет? Что такое "значение вообще" для такого типа?
+
+** Абстракция значения: declval
+- Интересный способ решаить эти проблемы это ввести шаблон функции (который выводит типы) без тела (чтобы его нельзя было по ошибке вызвать)
+#+begin_src cpp
+template <typename T> add_rvalue_reference_t<T> declval();
+#+end_src
+- Теперь все просто 
+#+begin_src cpp
+template <typename T> struct Tricky {
+    Tricky() = delete;
+    const volatile T foo();
+};
+decltype(declval<Tricky<int>>().foo()) t; // ok
+#+end_src
+- Но какова природа этого значения?
+** Обсуждение
+- Пожалуй есть всего три функции, для которых имеет смысл возвращать правую ссылку (то есть производить xvalue)
+  - std::move
+  - std::forward
+  - std::declval
+- Если вы хотите написать свою фнукцию, которая будет возвращать && это значит, что
+  - Вы что то делает не так
+  - Вы хотите еще раз написать одну из упомянутых выше функций
+  - Вы пишите функцию, аннотированную && 
+
+** Конструирование из итераторов
+- Теперь мы видим совсем изящное решение
+#+begin_src cpp
+MyVector(size_t nelts, T value);
+template <typename Iter, typename = void_t<decltype(*std::declval<Iter&>()), ++std::declval<Iter&>())>
+MyVector(Iter fstr, Iter lst);
+// ...
+MyVector v1 (10, 3); // 1, 2failed
+MyVector v2 (v1.begin(), v1.end()); // 2
+#+end_src
+- Iter& именно потому что нас интересует для lvalue
+- В void_t мы видим шаблонный интерфейс, которому должен соответствовать Iter
+- И вот этот статический интерфейс который мы требуем от шаблона называется концепт
+
+* Свертки
+** Свертки
+| ... op pack      | ( ,,, (p1 op p2) op p3) ,,, op pN)   |
+| init ... op pack | ( ,,, (init op p1) op p2) ,,, op pN  |
+| pack op ...      | (p1 op (p2 op ( ,,, (pN-1 op pN) ,,, |
+| pack op ... fini | (p1 op (p2 op ( ,,, (pN op fini) ,,, |
+
+#+begin_src cpp
+template <typename ... T>
+auto sum_all (T ... args) {return (args + ...); }
+
+template <typename ... T>
+void print_all (T ... args) { (cout << ... << args) << endl; }
+#+end_src
+
+** Проблемы print_all
+#+begin_src cpp
+template <typename ... T>
+void print_all (T ... args) { (cout << ... << args) << endl; }
+#+end_src
+- Очевидно, что print_all записанный как есть не вставляеть между выыводимыми числами проблельные символы
+#+begin_src cpp
+print_all(1, 1.5, 3); // -> 11.53
+#+end_src
+- Как заставить его это сделать?
+
+** Решение: функтор AddSpace
+- Вадерворд и Йосьюттис предлагают следующее решение
+#+begin_src cpp
+template <typename T> class AddSpace {
+    const T& ref;
+public:
+    AddSpace(const T& r): ref(r) {}
+    ostream& operator<< (ostream& os, AddSpace s) {
+        return os << s.ref << ' ';
+    }
+};
+template <typename ... T> void print_all (T ... args) {
+    (cout << ... << AddSpace(args)) << "\n";
+}
+#+end_src
+
+** Экзотические свертки
+
+* Введение в итераторы
+** Первый пример: обход вектора
+- Задача: пока функция func возвращает true применять ее к элеменгтам вектора
+#+begin_src cpp
+template <typename F>
+size_t traverse (vector<int>& v, F func) {
+    size_t nelts = v.size();
+    for(size_t i = 0; i != nelts; ++i)
+        if(!func(v[i])) return i;
+    return nelts;
+}
+#+end_src
+- Видите ли вы проблемы в таком решении?
+** Обобщение обхода
+- Задача: пока функция func возвращает true применять ее к элементам произвольного контейнера
+#+begin_src cpp
+template <typename Cont, typename F>
+size_t traverse(Cont& cont, F func) {
+    size_t nelts = cont.size();
+    for(size_t i = 0; i != nelts; ++i) 
+        if(!func(cont[i])) return i;
+    return nelts;
+} 
+#+end_src
+- что если Cont это std::list?
+#+begin_src cpp
+tmeplate <typename Cont, typename F>
+size_t traverse(Cont& cont, F func) {
+    size_t elts = 0;
+    for ( auto it = cont.begin(); it != cont.end(); ++it; ++elts;)
+        if(!func(*it)) break;
+    return elts;
+}
+#+end_src
+- Теперь подойдет любой стандартный контейнер
+** range-based обход
+- Концепция итератора может быть скрыта под капотом
+#+begin_src cpp
+template <typename C, typename F>
+size_t traverse(C&& cont ,F func) {
+    size_t nelts = 0;
+    for(auto&& elt : cont)
+        if(!(++nelts, func(elt))) break;
+    return nelts;
+}
+#+end_src
+** Range-based обход
+#+begin_src cpp
+for(range_declaration : range_expression) loop_statement;
+#+end_src
+- Эквивалентно следующему
+#+begin_src cpp
+auto && __range = range_expression;
+auto __begin = std::begin(__range);
+auto __end = std::end(__range);
+for( ; __begin != __end; ++__begin) {
+    range_decalaration = *__begin;
+    loop_statement
+}
+#+end_src
+** Требования к range-based обходу
+- Обьект возвращаемый std::begin() должен поддерживать
+  - Инкремент
+  - Разыменование
+  - Сравнение на неравенство
+#+begin_src cpp
+for (; __begin != __end; ++__begin) {
+    range_decalaration = *__begin;
+}
+#+end_src
+- Эти требования входят в статический интерфейс (concept) прямого иетратора
+- Можно заметить, что всем этим требованиям отвечают обычные указатели
+- Очень важно: итератор это не какой то класс и не наследник какого то класса, это что угодно с этим интерфейсом
+
+* Свойства итераторов и асимптотика
+** Свойства укзателей
+- Создание по умолчанию, копирвоание, копирующее присваивание
+- Разыменование как rvalue и доступ к полям по разыменованию
+- Разыменование как lvalue и присваивание значения элемента под ним
+- Инкремент и постинкремент за O(1)
+- Сравнимость на равенство и неарвенство за O(1)
+- Декремент и постдекремент за O(1)
+- Индексирование квадратными скобками, сложение с целыми, сравнение на больше и меньше за O(1)
+- Многократный проход по одной и той же последовательности
+** Output итераторы
+- -> 0 2 3 ^
+** Input итераторы
+- -> 0 1 3 4 ^
+** Forward итераторы
+- -> 0 1 3 4 7 ^
+- 7 только обещать, в след об этом
+** Bidirectional итераторы
+- -> 0 1 3 4 5 7 ^
+** Random-acces итераторы
+- -> 0 1 3 4 5 6 7 ^
+
+
+
+** Итераторы: дело в асимптотике
+- Инкремент и постинкремент за O(1) // forward
+- Сложение с целыми за O(1) // randow - access
+- Довольно очевидно, что для forward итератора в общем случае продвижение на произвольное расстояние это O(N)
+- Есть функции, которые прячут это под капотом:
+#+begin_src cpp
+std::distance(Iter fst, Iter snd); // snd - fst, либо цикл
+std::advance(Iter fst, Iter snd); // fst + n, либо цикл
+#+end_src
+- Они делают это устраивая явную перегрузку по тегу категории 
+
+
