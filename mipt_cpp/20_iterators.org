@@ -1,0 +1,339 @@
+#+title: Базовый курс C++ (MIPT, ILab). Lecture 20. Итераторы
+#+author: idsyr
+
+* Немного о begin, end и ADL
+** Range-based обход
+#+begin_src cpp
+  for(init-statement; range_declaration : range_initializer)
+    Loop_statement;
+#+end_src
+- Эквивалентно следующему
+#+begin_src cpp
+  auto && __range = range_initializer;
+  auto __begin = begin(__range); // не обязательно std::begin
+  auto __end = end(__range); // не обязательно std::end
+  for(;__begin!=__end; ++__begin) {
+    range_declaration = *__begin;
+    Loop_statement
+  }
+#+end_src
+- ADL - имя функции ищется в пространстве имен аргумента
+
+* Превосходство итераторов
+** Итераторы: дело в асимптотике
+- Инкермент и постинкремент за O(1) // forward
+- Сложение с целыми за O(1) // random-access
+- Довольно очевидно, что для forward итераторы в общем случае продвиженеи на произвольное расстояниее это O(N)
+- Есть функции, которые прячут это под капотом:
+  std::distance(Iter fst, Iter snd); // snd - fst, либо цикл
+  std::advance(Iter fst, int n); // fst + n, либо цикл
+- Они деляют это устраивая явную перегрузку по тегу категории
+** Обсуждение
+- учитывая возможную плохую асимптотику distance, этот код может быть чуть хуже явного цикла
+#+begin_src cpp
+  template <typenmae C, typename F>
+  size_t traverse (C&& cont, F func) {
+    auto it = std::find_if_not(cont.begin(), cont.end(), func);
+    return std::distance(cont.begin(), it);
+  }
+#+end_src
+- Но может быть он чем то лучше?
+** Обсуждение: используйте итераторы
+- Этот пример лучше тем, что показывает реальное требование: не контейнер, а два итератора
+#+begin_src cpp
+  template <typenmae It, typenmae F>
+  size_t traverse (It start, It fin, F func) {
+    auto it = std::find_if_not(start, fin, func);
+    return std::distance(start, it);
+  }
+#+end_src
+- Есть ли в действительности разница по скорости?
+- Да и внезапно она бывает просто огромная
+
+* Категории итераторов
+** Определение категории итераторов
+- Используется класс характеристик
+#+begin_src cpp
+typename iterator_traits<Iter>::iterator_category
+#+end_src
+- Возможные значения
+  input_iterator_tag
+  output_iterator_tag
+  forward_iterator_tag: public input_iterator_tag
+  bidirectional_iterator_tag: public forward_iterator_tag
+  random_access_iterator_tag: public bidirectional_iterator_tag
+* Изобретаем enable_if
+** Проверка категории
+- Иногда мы хотим обложить перегрузку SFINAE проверкой
+#+begin_src cpp
+template <typename It>
+// имеет смысл только для input iterators
+void foo(It first, It last)
+#+end_src
+- Поможет ли нам здесь void_t?
+** Интерлюдия: conditional_type
+- Рассмотрим следующую sfinae-триаду
+  #+begin_src cpp
+    template <bool B, typename T, typename F>
+    struct conditional { using type = T; }
+
+    template <typname T, typename F>
+    struct conditional<false, T, F> { using type = F; }
+
+    template <bool B, typename T, typename F>
+    using conditional_t = typename conditional<B, T, F>::type;
+  #+end_src
+  - Она представляет собой условный тип
+  - Можно ли сделать его невалидным для F?
+** Условный тип
+- Рассмотрим следующю sfinaе-триаду
+  #+begin_src cpp
+    template <bool B, typename T>
+    struct conditional { using type = T; }
+
+    template <typname T>
+    struct conditional<false, T> {  }
+
+    template <bool B, typename T>
+    using conditional_t = typename conditional<B, T>::type;
+  #+end_src
+  - Да, просто вычеркнем технически все упомнинания false-type
+
+** ENABLE_IF
+- Получившаяся триада enable_if является одной из самых полезных идиом в практическом SFINAE
+#+begin_src cpp
+  template <bool B, typename T = void>
+  struct enable_if { using type = T; };
+
+  template <typename T = void>
+  struct enable_if<false, T> {};
+
+  template <bool B, typename T = void>
+  using enable_if_t = typename enable_if<B, T>::type;
+#+end_src
+- Выкинув false, сделаем true примитивным, например void
+
+** Проверка категории
+- Иногда мы хотим обложить перегрузку SFINAE проверкой
+#+begin_src cpp
+  template <typename It>
+  using interator_category_t =
+    typename std::iterator_traits<It>::iterator_category;
+
+  template <typenmae It, typenmae T =
+    std::enable_if_t<
+         std::is_base_of_v<
+              input_iterator_tag,
+              iterator_category_t<It>>>>
+  void foo(It first, It last) 
+#+end_src
+* Итераторы и не итераторы
+#+begin_src cpp
+using value_type = int;
+using difference_type = ptrdiff_t;
+using pointer = int*;
+using reference = int&;
+#+end_src
+
+* Обьединяем пару диапазонов
+** Case study: пишем свой итератор
+- Постановка задачи: итерирование сразу по двум контейнерам
+#+begin_src cpp
+  std::vector<int> keys = {1 ,2 ,3 ,4 };
+  std::vector<double> values = {4.0, 3.0, 2.0, 1.0};
+  for(auto && both : make_zip_range(keys, values))
+    std::cout << both.first << ", " << both.second << "; ";
+  // 1, 4.0;
+#+end_src
+- Нужно придумать легковесную обертку zip_range и возвращаемые ей итераторы (тип для них)
+** Пишем свой итератор: подготовка
+- Создание zip_range очень просто
+#+begin_src cpp
+  template <typename Keys, typename Values>
+  auto make_zip_range(Keys& K, Values &V) {
+    return zip_range_t<Keys, Values> { K, V} ;
+  }
+#+end_src
+- И сам он очень прост, сложности только с типом итератора
+- Что должен внутри себя хранить zip_range?
+** Пишем свой итератор: тело
+- Тело тоже не представляет проблем
+#+begin_src cpp
+  template <typenmae Keys, typename Values>
+  class zip_range_t {
+    Keys &K_; Values &V_;
+    public:
+    zip_iterator_t<KIter, VIter> begin() {
+      return make_zip_iterator(std::begin(K_), std::begin(V_));
+    }
+    // ....
+  }
+#+end_src
+** Пишем свой итератор: первые шаги
+- В нашем итераторе нам нужно определить 5 фундаментальных подтипов
+  - iterator_category - категория нашего итератора
+  - difference_type - тип для хранения разности итарторов
+  - value_type - тип значений, по которым мы итерируемся
+  - reference - тип ссылки на значения, по которым мы итерируемся
+  - pointer - тип указателя на значения, по которым мы итерируемся
+- Как их определить в этом конкретном случае?
+
+** Простые вещи
+- Некоторые вещи действительно просты
+#+begin_src cpp
+  // вспомогательные using для value_type составных частей
+  using KeyType = typename iterator_traits<KeyIt>::value_type;
+  using ValueType = typename itrerator_traits<ValueIt>::value_type;
+  // наше value это пара values
+  using value_type = std::pair<KeyType, ValueType>;
+#+end_src
+- К сожалению так нельзя определить тип pointer, потому что мы на самом деле не интерируемся по контейнеру пар
+
+** Базовый интерфейс
+- Нет никаких проблем чтобы попарно увеличивать и уменьшать итераторы
+#+begin_src cpp
+  zip_iterator_t(KeyIt Kit, ValueIt Vit): Kit_(Kit), Vit_(Vit) {}
+  zip_iterator_t &operator++() { ++Kit_; ++Vit_; return * this;}
+  zip_iterator_t *operator++(int) {}
+#+end_src
+- Первая засада ждет на оепраторе разыменования
+#+begin_src cpp
+  using reference = std::pair<KeyType&, ValueType&>;
+  reference operator*() const { return { *Kit_, *Vit_}; }
+#+end_src
+** Всегда пользуйтесь traits
+- Очевидно
+#+begin_src cpp
+using reference = std::pair<KeyType&, ValueType&>;
+#+end_src
+- Это ошибка если в контейнере reference отличается от value&, например для vector<bool> и многих других
+- Корректно:
+#+begin_src cpp
+  using KeyRef = typename iterator_traits<KeyIt>::reference;
+  using ValueRef = typename iterator_traits<ValueIt>::reference;
+  using reference = std::pair<KeyRef, ValueRef>;
+  reference operator*() const { return {*Kit_, *Vit};
+#+end_src
+** Настоящая проблема: стрелочка
+- Как вообще должен выглядеть оператор разыменования?
+#+begin_src cpp
+  auto zit = make_zip_iterator(k.begin(), b.begin());
+  assert(k.front() == zit->first);
+  // zit->first drills down to (zit.operator->())->first
+#+end_src
+- Это должен быть аналог разыменованию и обращению к полю
+#+begin_src cpp
+pointer operator->() const {return /* some pointer */;
+#+end_src
+- Но что такое pointer? Простое решение не подходит
+#+begin_src cpp
+  using pointer = std::pair<KeyPtr, ValuePtr>; // нет p-> first
+#+end_src
+** Изящное решение: прокси класс
+- На помощь приходит прокси класс
+#+begin_src cpp
+  template <typename Reference> struct arrow_proxy {
+    Reference R;
+    Reference *operator->() { return &R: }
+  };
+  using pointer = arrow_proxy<reference>;
+  pointer operator->() const { return pointer{{*Kit_, *Vit_}}; }
+#+end_src
+- Есть некие опасения в том что прокси провиснет, но нам он нужен чтобы пережить dril-down, а его он явно переживет
+
+** Обсуждение
+- Рассмотренный zip-range это типичный адаптер итератора
+- Давайте поговорим о некоторых других
+
+* Константные и обратные итераторы
+** Обсуждение
+- Категории итераторов это не едиственный признак по каоторому они могут различаться
+- Какие еще признаки приходят на ум для различия итераторов внутри одной и той же категории, например bidirectional
+** Направления и константность
+- По направлению: cont.begin() cont.rbegin()
+- Константные: cont.cbegin() cont.crbrgin()
+** Пример обратных иетраторов
+- как получить вектор обратный данному?
+#+begin_src cpp
+  vector<int> vecf = { 1, 2, 3, 4, 5, 6};
+#+end_src
+- Плохой вариант
+#+begin_src cpp
+  vector<int> vecb { vecf.end(), vecf.begin() };
+#+end_src
+- Хороший вариант
+#+begin_src cpp
+  vector<int> vecb { vecf.rbegin(), vecf,rend() };
+#+end_src
+** Преобразования указателей
+| ptr | static_cast | -> | const pointer|
+| ptr | <- | const cast | const pointer |
+- Она так проста потому что указатели ковариантны к константности
+** Диаграмма Майерса
+- давай ты просто посмотришь на (1:05:42)
+* Трюки Майерса и Хиннанта
+** Предложение Майерса
+- Актуальная проблема: const_cast для итераторов. То есть как привести const_iterator к обычному?
+- Майерс предлагает использовать advance
+#+begin_src cpp
+  Iter i(cont.begin());
+  std::advance(i, std::distance<decltype(ci)>(i, ci));
+#+end_src
+- Зачем явно указан шаблонный параметр? Чтобы избежать неодназначного вывода типов
+- Проблемы с этим подходом? время O(N) для "неудачных" контейнеров, таких, как списки
+** Трюк Хинанта
+#+begin_src cpp
+  template <typename Container, typename ConstIterator>
+  typename Countainer::iterator
+  remove_constness(Container& c, ConstIterator it) {
+    return c.erase(it, it);
+  }
+#+end_src
+- Идея в том, что начиная с С++11, удаление пустого диапазона позволено, не делает ничего и возвращает iterator
+- Это работает за O(1) но не работает для обратных итераторов и для строк
+* Обратный обход и вставка
+** Адаптация: обратный range-based обход
+- Задача: сделать адаптер reverse_cont, такой, чтобы работал цикл:
+  for(auto &&elt : vec) - обойти в прямом порядке
+  for(auto &&elt : reverse_cont(vec)) - обойти в обратном порядке
+** Реализация reverse_cont
+#+begin_src cpp
+  template <typename T> struct reversion_wrapper {
+    T& iterable;
+  };
+  template <typename T> auto begin(reveersion_wrapper<T> w) {
+    return rbegin(w.iterable);
+  }
+  template <typename T> auto end(reversion_wrapper<T> w) {
+    return rend(w.iterable);
+  }
+  template <typename T>
+  reversion_wrapper<T> reverse_cont(T&& iterable) {
+    return { iterable };
+  }
+#+end_src
+- Это разительно отличается от полноценного zip range
+- Тут мы по сути переиспользуем обычные итераторы, меняется только обертка
+** Адаптация: inserters
+- Преобразования записи во вставку
+#+begin_src cpp
+  std::vector<int> vec;
+  // тяжелый способ
+  std::back_insert_iterator<std::vector<int>> bins(vec);
+  // легкий способ, похожий на reverse_cont выше
+  auto bins = std::back_inserter(vec);
+  *bins = 1; // вставка элемента, как vec.push_back(1)
+#+end_src
+- Что должен делать инкремент bins++?
+- Практически ничего
+- Более того, даже разыменование *bins ничего осмысленного не делает, поэтому работает даже bins = 1 без *
+* Завершение и анонс инвалидации
+** Обсуждение
+- Рассмотрим этот пример еще раз
+#+begin_src cpp
+  std::vector<int> vec = {10, 20, 30, 40, 50, 60};
+  auto i5 = vec.begin() + 5;
+  cross_copy(lst.begin(), lst.end(), std::inserter(vec, vec.begin() + 3));
+  *i5 = 42;
+#+end_src
+- А теперь что в векторе?
