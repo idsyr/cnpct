@@ -1,0 +1,392 @@
+#+title: Базовый курс C++ (MIPT, ILab). Lecture 27. Constexpr функции. 
+#+author: idsyr
+
+* Еще раз о константности и control flow
+** Константность
+- В чем смысл следующей конструкции и где она может быть применима?
+#+begin_src cpp
+uint8_t const volatile * const p_latch_reg = (uint8_t *) 0x42;
+#+end_src
+- Это проводок с заданным адресом, с которого можно считать данные но не изменить их
+- При этом сами данные могут непредсказуемо изменить, так что доступ к ним нельзя оптимизировать
+#+begin_src c++
+  data = *p_latch_reg; // считали значение
+  data = *p_latch_reg; // снова считали значение
+#+end_src
+- Этот пример показывает, что const означает readonly
+** Что известно на этапе компиляции
+- Литералы (1, "hello", 'c', 1ull) и члены enum
+- Параметры шаблонов и результаты sizeof над типами
+- constexpr переменные
+#+begin_src c++
+  template <typename T> struct my_numeric_limits;
+  template <> struct my_numeric_limits<char> {
+    static constexpr size_t max() { return CHAR_MAX; }
+  };
+  constexpr size_t arrsz = my_numeric_limits<char>::max();
+  int arr[arrsz]; // ok
+#+end_src
+** CONSTEXPR означает CONST?
+- Правильный вариант:
+  - constexpr int * x -> int * const x
+- аннотация относится к имени
+** Некоторые альтернативы SFINAE
+#+begin_src c++
+  template <typename T> enable_if_t<(sizeof(T) > 4)>
+  foo(T x) {}
+  template <typename T> enable_if_t<(sizeof(T) > 4)>
+  foo(T x) {}
+#+end_src
+- Кажется, теперь появился иной вариант
+#+begin_src C++
+  template <typename T> void
+  foo(T x) {
+    if constexpr (sizeof(T) > 4) {}
+    else {}
+  }
+#+end_src
+- Но это выглядит немного интрузивно. Скоро мы увидим еще лучшие опции
+
+
+** C++17: constexpr control flow
+- Возможность использования выражений времени компиляции делает интересным вопрос переключения по ним
+#+begin_src c++
+  if constexpt(b) {}
+  else {} // эта ветка не участвую в 
+#+end_src
+- Начиная с С++17 такое ленивое поведение предоставляет if constexpr
+- Обратите внимание: основное использование этой конструции это выбрасывание веток инстанцирований 
+
+** if constexpr для вариабельных шаблонов
+- В случае вариабельных шаблонов тоже можно избежать специализаций
+#+begin_src C
+  template <typename Head, typename... Tail>
+  void print (Head head, Tail... tail) {
+    std::cout << head;
+    if constexpr(sizeof...(tail) > 0) {
+        std::cout<< ", ";
+        print(tail...);
+      }
+  }
+#+end_src
+
+** Снова о метапрограммах
+- Простая задача: возведение в квадрат времени компиляции
+#+begin_src C++
+  template <size_t n> square: integral_constant <size_t, n*n>;
+  int arr[square<5>{}; // arr[25]
+#+end_src
+- Тут угадать, что square на самом деле функтор - довольно сложно
+#+begin_src C++
+  constexpr int square(int x) {return x*x;} // ok
+#+end_src
+- Теперь очевидно, что мы вызываем функцию времени компиляции
+- Стандарт накладывает некоторые ограничения на тела таких функций
+* Ограничения на constexpr функции
+** Ограничения в С++14
+- new и delete
+- генерация исключений через throw
+- вызов не constexpr функций
+- использование goto
+- лямбда выражения
+- преобразования const_cast и reinterpret_cast
+- преобразования void* в object*
+- модификация нелокальных обьектов
+- неинициализированные данные
+- сравнения с unspecified результатом
+- вызов type_id для полиморфных классов и dynamic_cat
+- блоки try для обработки исключений
+- операции с undefined behavior
+- инлайн ассемблер во всех разновидностях
+- большая часть операций с this
+* Идиома throw
+** Пример: целочисленный логарифм
+#+begin_src C++
+  constexpr size_t int_log(size_t N) {
+    size_t pos = sizeof(size_t) * CHAR_BIT, mask = 0;
+    // THROW IDIOM
+    if(N==0) throw "N == 0 not supported";
+    do {
+      pos -=1;
+      mask = 1ull << pos;
+    } while ((N & mask) != mask);
+    if(N!=mask) pos+=1;
+    return pos;
+  }
+#+end_src
+** Не всегда constexpr
+- Логичный вопрос: можно ли перегрузить функцию по constexpr, чтобы иметь и статический и нестатических вариант int_log?
+- Ответ немного удивителен: это просто не нужно. Статический вариант уже может быть использован с неизвестным на этапе компиляции аргументом
+#+begin_src C++
+  std::cin >> x;
+  std::cout << int_log(x) << std::endl;
+#+end_src
+- Поэтому constexpr не входит в тип функции и не может анностировать параметры
+** Обсуждение
+- Можем ли мы каким-то образом гарантировать, что constexpr функция выполниласт во время компиляции?
+- Решение: использовать в compile-time контексте (положить в constexpt переменную, сделать размером массива, параметризовать шаблон)
+#+begin_src C++
+  constexpr int logval = int_log(5);
+  int t = logval;
+#+end_src
+- Теперь мы уверены, что вызов состоялся на этапе компиляции
+* Consteval и constint
+** С++20, введение consteval и constinit
+- Функции, помеченные consteval обязаны быть выполнены именно и конкретно на этапе компиляции
+#+begin_src C++
+  consteval int ctsqr(int n) {return n*n;}
+  constexpr int r = ctsqr(100); // OK
+  int x = 100; int r2 = ctsqr(x); // Ошбика: не ct const
+#+end_src
+- Для того чтобы гарантировать константную инициализацию constexpr необорот слишком сильная гарантия и достаточно constinit
+#+begin_src C++
+  constinit int x = 1000; // запрещено для локальных переменных
+  ++x; // OK
+#+end_src
+** Не везде constexpr
+- Двойная природа constexpr функций имеет обратную сторону
+#+begin_src C++
+  tmeplate <typename T>
+  constexpr size_t ilist_sz(std::initializer_list<T> init) {
+    constexpr size_t init_sz = init.size();
+    return init_sz;
+  }
+#+end_src
+- Это ошибка. Компилятор тут не может дать гарантию константности для переменной (хотя сама функция и constexpr)
+- fix: size_t init_sz ....
+
+* Мета-ООП и пользовательские суффиксы
+** Пользовательские литеральные типы
+- Чтобы сделать пользовательский тип литеральным, ему нужен constexpr конструктор
+#+begin_src C++
+  struct Complex {
+    constexpr Complex(double r, double i) : re(r), im(i) { }
+    constexpr double real() const { return re; }
+    constexpr double imag() const ( return im; }
+      private:
+      double re, im;
+  };
+constexpr Complex c{0.0, 1.0}; // это литеральное значение
+#+end_src
+** Арифметика
+- Для таких обьектов становится возможной арифметика времени компиляции
+#+begin_src C++
+  constexpr Complex Complex::operator+= (Complex rhs) {
+    re += rhs.re; im+=ths.im; return *this;
+  }
+  constexpr Complex operator+ (Complex lhs, Complex rhs) {
+    lhs += rhs; return lhs;
+  }
+constexpr Complex c{0.0, 1.0}, d{1.0, 2.0};
+constexpr Complex e = c + d;
+#+end_src
+** Обсуждение
+- Литералы такого класса выглядят как Complex[1.0, 1.0}
+- Хотелось бы более привычной формы 1.0 + 1.0_i
+- Для сложения у нас есть выход, но как приделать суффикс?
+- Удивительно, но для этого мы тоже используем перегрузку очень специального оператора
+** Пользовательский суффикс
+- И это оператор кавычки
+#+begin_src C++
+  constexpr Complex operator "" _i (long double arg) {
+    return Complex{0.0, arg};
+  }
+  constexpr Complex c = 0.0 + 1.0_i; // ok, arg_i -> ""_i(arg)
+#+end_src
+- Здесь суффикс определен с параметром типа double
+** Внезапная проблема
+- Допустим, хочется переопределить суффикс _binary для бианрных констант
+- Но уже даже довольно маленькая константа: 1010101010101_binary не влазит в unsigned long long параметр 
+- Решение: синтаксис с вариабельным суффиксом
+#+begin_src C++
+  template <char... Chars>
+  constexpr unsigned long long operator "" _binary() {
+    // ???
+  }
+#+end_src
+** Небольшая метапрограмма 
+#+begin_src C++
+  template <int Sum, char... Chars> struct binparser;
+    
+  template <int Sum, char... Rest> struct binparser<Sum, '0', Rest...> { static constexpr int value = binparser<Sum * 2, Rest...>::value; };
+
+  template <int Sum, char... Rest> struct binparser<Sum, '1', Rest...> { static constexpr int value = binparser<Sum * 2 + 1, Rest...>::value; };
+
+  template <int Sum> struct binparser<Sum> { static constexpr int value = Sum; };
+
+  // ??? ->
+  return binparser<0, Chars...>::value;
+#+end_src
+** Ладно, это была шутка
+#+begin_src C++
+    template <char... Chars> constexpr int operator "" _binary() {
+      std::array<int, sizeof...(Chars)> arr { Chars... };
+      int sum = 0;
+      for( auto c : arr)
+        switch(c) {
+  	case '0' : sum = sum * 2; break;
+  	case '1' : sum = sum * 2 + 1; break;
+  	default: throw "Unexptected symbol";
+  	}
+      return sum;
+  }
+#+end_src
+- Но как мы использовали в программе времени компиляции std::array?
+* Constexpr all the things!
+- После их появления, constexpr-ctors начали торжественно расползаться по стандартной библиотеке
+- Очевидно сразу появились constexpr контейнера std::array и std::bitset
+- Точно так же сразу появились constexpr алгоритмы
+- Постепенно контейнеров и алгоритмов (с некоторыми ограничениями) стоановится больше и больше
+- Первоначально написание дуального кода было связано с некоторыми проблемами
+** Case study: замена vector на array
+- Попробуем перейти от
+#+begin_src C++
+  template <typename T> class PermLoop {
+    std::vector<T> loop_;
+  ....
+    PermLoop(std::initializer_list<T> ls): loop_(ls_ { reroll(); }
+#+end_src
+- К чему то вроде (в таком виде это не будет работать нет explicit initlist ctr)
+#+begin_src C++
+  template <typename T, size_t N> class PermLoop {
+    std::array<T, N> loop_; // представим что vector не constexpr
+    ....
+    constexpr PermLoop(std::initializer_list<T> ls): loop_(ls)
+#+end_src
+* Index sequence на примере
+** Index squences
+- Удивительно полезный класс integer_sequence
+#+begin_src C++
+  template <class T, T... Ints> class integer_sequence;
+#+end_src
+- его синоним если нам нужны индексы:
+#+begin_src C++
+  template <size_t... Ints> using index_sequence = std::integer_sequence<size_t, Ints...>;
+#+end_src
+- Мы можем писать std::make_index_sequence<3>
+- Типом этого выражения является integer_sequence<size_t, 0, 1, 2>
+- Теперь у нас есть инструменты чтобы подступиться к созданию array
+** Переход от вектора к массиву
+#+begin_src C++
+  template <typename T, size_t N, size_t... Ns>
+  constexpr std::array<T, N>
+  make_array_impl(std::initializer_list<T> t,
+  		std::index_sequence<Ns...>) {
+    return std::array<T, N>{*(t.begin() + Ns)...};
+  }
+  template <typename T, size_t N>
+  constexpr std::array<T, N>
+  make_array(std::initializer_list<T> t) {
+    return make_array_impl<T, N> (t, std::make_index_sequence<N>());
+  }
+#+end_src
+** C++20: constexpr vector и string!
+- Казалось бы мучений с заменой на array больше не надо?
+#+begin_src C++
+  struct S {
+    std::vector<int> arr;
+    constexpr S(std::initializer_list<int> il) : arr(il) {}
+  };
+#+end_src
+** Core constant erpression...
+- Все что касается constexpr, полно сложных и странных сюрпризов
+#+begin_src C++
+      struct S {
+        int n_;
+        S(int n) : n_(n) {}
+        constexpr int get() { return 42; }
+      };
+  int main() {
+    S s{2};
+    constexpr int k = s.get();
+  }
+#+end_src
+* Неявные интерфейсы и их проверка
+** Обсуждение
+- Говорят, что интерфейсы в статическом полиморфизме являются неявными
+- Хорошо ли, что они неявные?
+- Должны ли они быть неявными?
+- Что если взять пример попроще и, находясь в реалиях C++17, попробовать сформулировать явный интерфейс в терминах типов?
+** Пример: проверка равенства
+- В следующей функции неявный контракт состоит из одного пункта: равенство
+#+begin_src C++
+  template <typename T, typename U>
+  bool check_eq (T &&lhs, U **rhs) { return (lhs == rhs); }
+#+end_src
+- Разумеется, это требование можно сформулировать явно
+#+begin_src C++
+  template <typename T, typename U, typename = void>
+  struct is_equality_comparable : false_type {};
+
+  template <typename T, typename U>
+  struct is_equality_comparable <T, U, 
+    void_t<decltype(declval<T>() == declval<U>())>> : true_type {};
+#+end_src
+- Вопрос в том, как его лучше всего проверить?
+- Опция по умолчанию в таких случаях это enable_if
+#+begin_src C++
+  template <typename T, typename U, 
+    typename = enable_if_t <is_equality_comparable<T, U>::value>>
+  bool check_eq (T && lhs, U && rhs) { return (lhs == rhs); }
+#+end_src
+- Теперь сообщение будет выглядеть как то так:
+  - error: no matching function for call to 'check_eq'
+** Обсуждение
+- Используется шаблонный параметр, которого на самом деле не существует
+#+begin_src C++
+  check_eq<int, std::string, void>(1, "1"); // oops, 157 err lines
+#+end_src
+- В случае проблемы будет выдано сообщение, что не такой функции, но не будет ничего или почти ничего сказано о том почему ее нет
+** Интересная идея
+- Заслуживает внимания идея if constexpr + static assert
+#+begin_src C++
+  template <typename T, typename U>
+  bool check_eq (T && lhs, U && rhs) {
+    if constexpr (!is_equality_comparable<T, U>::value>) {
+      static_assert(0 && "equality comparable expected");
+    }
+    return (lhs == rhs);
+  }
+#+end_src
+- Перенося проверку корректности из контекста подстановки в тело функции мы меняем SFINAE-out на ошибку. Но часто мы хотим именно SFINAE-out
+** Загадочный distance
+- Вспомним наши мучения с самописным итератором где мы нечто забыли...
+  - error: no matching function for call to 'distance(junk_iter_t&, junk_iter_t&)' .... no type named 'difference_type' in .... 
+  - Ъ
+  - хотя он там есть
+* Простые ограничения
+** Констрейты
+- Констрейты были введены чтобы сделать статические интерфейсы явными
+#+begin_src C++
+  template <typename T, typename U> bool
+    requires is_equality_comparable<T, U>::value
+  check_eq(T && lhs, U && rhs) { return (lhs == rhs); }
+#+end_src
+- Больше нет мусорного параметра шаблона. Языковые средства используются для того, для чего нужны
+- Сообщение об ошибке куда как лучше
+-  Внутри requires может быть что угодно, вычислимое на этапе компиляции
+** Полное покрытие
+- Все помнят почему не работает очевидный SFINAE подход к разграничению?
+#+begin_src C++
+  template <typename T, typename = enable_if_t<(sizeof(T) > 4)>> void foo(T x) {}
+  template <typename T, typename = enable_if_t<(sizeof(T) <= 4)>> void foo(T x) {}
+#+end_src
+- Очевидный подход через констрейты вполне работает
+#+begin_src C++
+    template <typename T> requires (sizeof(T) > 4) void foo(T x) {}
+#+end_src
+** Недостатки sfinae-constraints
+- Увы, SFINAE определители не упорядочены в отношении ограниченности
+#+begin_src C++
+  template <typename It>
+  struct is_input_iterator : std::is_base_of<
+        std::input_iterator_tag,
+        typename std::iterator_traits<It>::iterator_category>{};
+
+  template <typename It>
+  struct is_random_iterator : std::is_base_of<
+        std::random_access_iterator_tag,
+        typename std::iterator_traits<It>::iterator_category>{};
+#+end_src
+
+* Литература
